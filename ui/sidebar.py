@@ -453,6 +453,17 @@ def build_sidebar(
             )
             ui["show_warmtenet_model"] = show_warmtenet
             ui["show_wegennet"] = show_wegennet
+            auto_blocked_water_pot = False
+            water_pot_key = LAYER_CFG["water_potentie"]["toggle_key"]
+            selected_gemeenten = st.session_state.get("gemeente_selectie", [])
+            is_leeuwarden = any(
+                str(g).strip().lower() == "leeuwarden" for g in selected_gemeenten
+            )
+            water_pot_blocked = show_wegennet and is_leeuwarden
+            if water_pot_blocked:
+                if st.session_state.get(water_pot_key):
+                    st.session_state[water_pot_key] = False
+                    auto_blocked_water_pot = True
             if show_warmtenet:
                 default_show_sources = bool(
                     st.session_state.get("warmtenet_show_sources", True)
@@ -515,8 +526,8 @@ def build_sidebar(
                     "Filter op woonplaats",
                     options=model_wp_options,
                     default=default_model_wp,
+                    key="warmtenet_wp_selectie",
                 )
-                st.session_state["warmtenet_wp_selectie"] = model_wp_selectie
                 ui["warmtenet_wp_selectie"] = model_wp_selectie
 
                 type_opts = warmtenet_meta.get("types", []) if warmtenet_meta else []
@@ -713,8 +724,8 @@ def build_sidebar(
                             "Filter op woonplaats",
                             options=wp_options,
                             default=default_wp,
+                            key="wegennet_wp_selectie",
                         )
-                        st.session_state["wegennet_wp_selectie"] = wp_selectie
                         ui["wegennet_wp_selectie"] = wp_selectie
 
                         type_opts = (
@@ -810,8 +821,15 @@ def build_sidebar(
                 "Waterlichamen potentie",
                 value=False,
                 key=LAYER_CFG["water_potentie"]["toggle_key"],
+                disabled=water_pot_blocked,
             )
             ui["show_water_potentie"] = show_water_pot
+            if auto_blocked_water_pot or water_pot_blocked:
+                st.warning(
+                    "Waterlichamen potentie is automatisch uitgezet omdat Wegennetten "
+                    "aanstaat bij gemeente Leeuwarden. Zet Wegennetten uit om deze laag "
+                    "te kunnen gebruiken."
+                )
             default_water_opacity = pot_meta.get("water_potentie", {}).get(
                 "default_opacity", 0.7
             )
