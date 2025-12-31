@@ -96,14 +96,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-show_wegennet_state = bool(
-    st.session_state.get(LAYER_CFG["wegennet"]["toggle_key"], False)
-)
-if show_wegennet_state:
-    st.warning(
-        "Let op: Wegennet is een zware laag. Als er veel lagen tegelijk aanstaan, "
-        "kan de app een MessageSizeError geven. Zet een laag uit en probeer opnieuw."
-    )
 
 # --- containers om de gewenste volgorde te forceren ---
 kpi_container = st.container()
