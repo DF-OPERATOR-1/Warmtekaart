@@ -1,11 +1,12 @@
 # core/layers.py
 from __future__ import annotations
 
-from typing import Iterable, List, Dict, Any, Union
+from typing import List, Dict, Any, Union, TYPE_CHECKING
 import math
 
 import pydeck as pdk
 import streamlit as st
+from pyproj import Transformer
 
 from .config import LAYER_CFG, BASEMAP_CFG
 from .utils import (
@@ -14,10 +15,21 @@ from .utils import (
     colorize_geojson_cached,
     colorize_numeric_geojson,
     format_dutch_number,
+    get_color_palette,
+    extract_numeric_values,
+    compute_quantile_breaks,
+    format_numeric_range_labels,
 )
 
 JSONLike = Union[Dict[str, Any], List[Dict[str, Any]]]
 Records = List[Dict[str, Any]]
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+
+_RD_TO_WGS84 = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
+
 
 # ------------------------------------------------------------
 # Helpers: data normaliseren naar records (list[dict])
@@ -28,6 +40,7 @@ def _to_records(data: Union[Records, "pd.DataFrame"]) -> Records:
         return []
     try:
         import pandas as pd  # lazy
+
         if isinstance(data, pd.DataFrame):
             return data.to_dict("records")
     except Exception:
@@ -36,6 +49,7 @@ def _to_records(data: Union[Records, "pd.DataFrame"]) -> Records:
         return [dict(x) for x in data]
     return []
 
+
 def _fmt0(x):
     """Formatteer een getal als Nederlandse integer-string."""
     try:
@@ -43,10 +57,13 @@ def _fmt0(x):
     except Exception:
         return format_dutch_number(x, 0)
 
+
 # ------------------------------------------------------------
-# GeoJSON filteren op selectie (zoom 11–12)
+# GeoJSON filteren op selectie (zoom 11–13)
 # ------------------------------------------------------------
-def filter_geojson_by_selection(gjson: dict, woonplaatsen: list[str] | None, zoom_level: int):
+def filter_geojson_by_selection(
+    gjson: dict, woonplaatsen: list[str] | None, zoom_level: int
+):
     """Beperk GeoJSON tot geselecteerde woonplaatsen bij hogere zoomniveaus."""
     if not gjson:
         return gjson
@@ -57,12 +74,279 @@ def filter_geojson_by_selection(gjson: dict, woonplaatsen: list[str] | None, zoo
     wp = {str(w).strip().lower() for w in woonplaatsen}
     feats = []
     for f in gjson.get("features", []):
-        pr = (f.get("properties") or {})
+        pr = f.get("properties") or {}
         gm = str(pr.get("gemeentenaam", "")).strip().lower()
         bn = str(pr.get("buurtnaam", "")).strip().lower()
         if gm in wp or bn in wp:
             feats.append(f)
     return {"type": "FeatureCollection", "features": feats}
+
+
+# ------------------------------------------------------------
+# GeoJSON conversie + laag-meta
+# ------------------------------------------------------------
+def _first_coordinate(coords):
+    if isinstance(coords, (list, tuple)):
+        if coords and isinstance(coords[0], (int, float)):
+            if len(coords) >= 2:
+                return coords[0], coords[1]
+            return None
+        for sub in coords:
+            sample = _first_coordinate(sub)
+            if sample:
+                return sample
+    return None
+
+
+def _needs_rd_to_wgs_conversion(gjson: dict) -> bool:
+    if not gjson or gjson.get("type") != "FeatureCollection":
+        return False
+    for feat in gjson.get("features", []):
+        geom = feat.get("geometry") or {}
+        coords = geom.get("coordinates")
+        sample = _first_coordinate(coords)
+        if sample:
+            x, y = sample
+            if abs(x) <= 180 and abs(y) <= 90:
+                return False
+            if abs(x) > 200 or abs(y) > 200:
+                return True
+    return False
+
+
+def _transform_coords_rd_to_wgs(coords):
+    if isinstance(coords, (list, tuple)):
+        if coords and isinstance(coords[0], (int, float)):
+            if len(coords) >= 2:
+                lon, lat = _RD_TO_WGS84.transform(coords[0], coords[1])
+                return [float(lon), float(lat)]
+            return coords
+        return [_transform_coords_rd_to_wgs(c) for c in coords]
+    return coords
+
+
+def convert_geojson_to_wgs84_if_needed(gjson: dict) -> dict:
+    if not gjson or gjson.get("type") != "FeatureCollection":
+        return gjson
+    if not _needs_rd_to_wgs_conversion(gjson):
+        return gjson
+    feats_new = []
+    for feat in gjson.get("features", []):
+        geom = feat.get("geometry") or {}
+        coords = geom.get("coordinates")
+        new_geom = {
+            "type": geom.get("type"),
+            "coordinates": _transform_coords_rd_to_wgs(coords),
+        }
+        feats_new.append(
+            {
+                "type": "Feature",
+                "properties": feat.get("properties"),
+                "geometry": new_geom,
+            }
+        )
+    return {"type": "FeatureCollection", "features": feats_new}
+
+
+def _format_kwh_value(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{format_dutch_number(value, 0)} kWh"
+
+
+def _format_mwh_value(value: float | None) -> str:
+    if value is None:
+        return "-"
+    try:
+        mwh_value = float(value) / 1000.0
+        if not math.isfinite(mwh_value):
+            return "-"
+    except (TypeError, ValueError):
+        return "-"
+    return f"{format_dutch_number(mwh_value, 0)} MWh"
+
+
+def _format_percent_value(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{format_dutch_number(value * 100, 1)}%"
+
+
+def _buurt_extra_rows(props: dict) -> str:
+    demand = props.get("Demand_ontvangen_kWh")
+    heat = props.get("heatDemand_kWh")
+    rows = []
+    if demand not in (None, ""):
+        try:
+            demand_val = float(demand)
+        except (TypeError, ValueError):
+            demand_val = None
+        rows.append(
+            f"<div class='tooltip-row'>Ontvangen warmtevraag: {_format_kwh_value(demand_val)}</div>"
+        )
+    if heat not in (None, ""):
+        try:
+            heat_val = float(heat)
+        except (TypeError, ValueError):
+            heat_val = None
+        rows.append(
+            f"<div class='tooltip-row'>Totale heat demand: {_format_kwh_value(heat_val)}</div>"
+        )
+    return "".join(rows)
+
+
+def build_water_potential_meta(gjson: dict) -> dict:
+    cfg = LAYER_CFG["water_potentie"]
+    n_colors = cfg.get("n_colors", 5)
+    colors = get_color_palette(cfg.get("palette", "BuGn"), n_colors, cfg.get("alpha", 210))
+    values = extract_numeric_values(gjson, cfg["prop_name"])
+    breaks = compute_quantile_breaks(values, n_colors)
+    if breaks and len(breaks) > n_colors - 1:
+        breaks = breaks[: n_colors - 1]
+    display_breaks = [b / 1000.0 for b in breaks] if breaks else []
+    legend_labels = format_numeric_range_labels(
+        display_breaks, suffix=cfg.get("tooltip_unit", "MWh"), decimals=0
+    )
+    return {
+        "breaks": breaks,
+        "colors": colors,
+        "labels": legend_labels,
+        "value_formatter": lambda v: _format_mwh_value(v),
+        "extra_rows_fn": None,
+        "default_opacity": 0.7,
+        "location_row_display": "none",
+    }
+
+
+def build_buurt_potential_meta(gjson: dict) -> dict:
+    cfg = LAYER_CFG["buurt_potentie"]
+    n_colors = cfg.get("n_colors", 5)
+    colors = get_color_palette(
+        cfg.get("palette", "YlOrRd"), n_colors, cfg.get("alpha", 210)
+    )
+    breaks = [i / n_colors for i in range(1, n_colors)]
+    legend_labels = format_numeric_range_labels(
+        [b * 100 for b in breaks], suffix="%", decimals=0
+    )
+    return {
+        "breaks": breaks,
+        "colors": colors,
+        "labels": legend_labels,
+        "value_formatter": lambda v: _format_percent_value(v),
+        "extra_rows_fn": _buurt_extra_rows,
+        "default_opacity": 0.7,
+        "location_row_display": "block",
+    }
+
+
+def build_warmtenet_meta(gjson: dict | None) -> dict:
+    """Maak kleur- en legenda-info voor warmtenet model."""
+    base_meta = {
+        "color_map": {},
+        "labels": {},
+        "default_opacity": 0.85,
+        "woonplaatsen": [],
+        "types": [],
+        "type_by_key": {},
+        "wp_by_key": {},
+    }
+    if not gjson or not isinstance(gjson, dict):
+        return base_meta
+
+    def _distinct_colors(n: int, alpha: int) -> list[list[int]]:
+        # verdeel tinten via golden ratio pm vergelijkbare tinten te voorkomen
+        import colorsys
+
+        colors = []
+        if n <= 0:
+            return colors
+        for i in range(n):
+            hue = (i * 0.618033988749895) % 1.0
+            sat = 0.58
+            val = 0.78 - (0.10 * ((i % 3) / 3))  # kleine variatie in helderheid
+            r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
+            colors.append([int(r * 255), int(g * 255), int(b * 255), alpha])
+        return colors
+
+    labels: dict[str, dict[str, str]] = {}
+    all_keys: list[str] = []
+    woonplaatsen_all: set[str] = set()
+    types_all: set[str] = set()
+    type_by_key: dict[str, str] = {}
+    wp_by_key: dict[str, str] = {}
+    for feat in gjson.get("features", []):
+        props = feat.get("properties") or {}
+        key = str(props.get("bron_key") or "").strip()
+        if not key:
+            continue
+        woonplaats_raw = str(props.get("woonplaats") or "").strip()
+        bron_label = str(props.get("bron_id") or "").strip()
+        type_bron = str(props.get("type_bron") or props.get("gegevensbron") or "").strip()
+        if not bron_label and "__" in key:
+            bron_label = key.split("__", 1)[1]
+        pretty_label = bron_label or key
+        labels.setdefault(
+            key,
+            {
+                "label": pretty_label,
+                "woonplaats_norm": woonplaats_raw.lower(),
+            },
+        )
+        all_keys.append(key)
+        wp_by_key[key] = woonplaats_raw
+        type_by_key[key] = type_bron
+        if woonplaats_raw:
+            woonplaatsen_all.add(woonplaats_raw)
+        if type_bron:
+            types_all.add(type_bron)
+
+    unique_keys = sorted(set(all_keys))
+    if not unique_keys:
+        return base_meta
+
+    cfg = LAYER_CFG.get("warmtenet_model", {})
+    alpha = cfg.get("alpha", 230)
+    colors = _distinct_colors(len(unique_keys), alpha)
+    color_map = {key: colors[idx % len(colors)] for idx, key in enumerate(unique_keys)}
+
+    return {
+        "color_map": color_map,
+        "labels": labels,
+        "default_opacity": 0.85,
+        "woonplaatsen": sorted(woonplaatsen_all),
+        "types": sorted(types_all),
+        "type_by_key": type_by_key,
+        "wp_by_key": wp_by_key,
+    }
+
+
+def build_wegennet_meta(gjson: dict | None) -> dict:
+    """Maak filter-opties voor wegennetlaag."""
+    type_labels = LAYER_CFG.get("wegennet", {}).get("type_labels", {})
+    base_meta = {
+        "woonplaatsen": [],
+        "types": sorted({str(k).lower() for k in type_labels.keys()}),
+        "type_labels": type_labels,
+        "default_opacity": LAYER_CFG.get("wegennet", {}).get("default_opacity", 0.8),
+    }
+    if not gjson or not isinstance(gjson, dict):
+        return base_meta
+
+    woonplaatsen_all: set[str] = set()
+    types_all: set[str] = set()
+    for feat in gjson.get("features", []):
+        props = feat.get("properties") or {}
+        wp = str(props.get("area_name") or "").strip()
+        if wp:
+            woonplaatsen_all.add(wp)
+        t = str(props.get("type") or "").strip().lower()
+        if t:
+            types_all.add(t)
+
+    base_meta["woonplaatsen"] = sorted(woonplaatsen_all)
+    base_meta["types"] = sorted(types_all) if types_all else base_meta["types"]
+    return base_meta
+
 
 # ------------------------------------------------------------
 # Basemap
@@ -104,6 +388,7 @@ def build_base_layers(style_key: str, hide_basemap: bool):
 
     return layers_local
 
+
 # ------------------------------------------------------------
 # H3 hoofdlaag + indicatieve laag
 # ------------------------------------------------------------
@@ -120,7 +405,10 @@ def create_main_layer(
     return pdk.Layer(
         "H3HexagonLayer",
         data_hex_df,
-        pickable=True, filled=True, extruded=extruded, coverage=1,
+        pickable=True,
+        filled=True,
+        extruded=extruded,
+        coverage=1,
         auto_highlight=False,
         get_hexagon="h3_index",
         get_fill_color="color",
@@ -132,7 +420,10 @@ def create_main_layer(
         opacity=float(layer_opacity),
     )
 
-def create_indicative_area_layer(data, extruded: bool, zoom_level: int, layer_opacity: float = 1.0):
+
+def create_indicative_area_layer(
+    data, extruded: bool, zoom_level: int, layer_opacity: float = 1.0
+):
     """
     H3 laag voor indicatieve aandachtsgebieden. Verwacht een reeds gefilterde bron
     (DataFrame of list[dict]) met minimaal de kolom h3_index.
@@ -141,7 +432,9 @@ def create_indicative_area_layer(data, extruded: bool, zoom_level: int, layer_op
     return pdk.Layer(
         "H3HexagonLayer",
         data_src,
-        pickable=True, filled=True, extruded=extruded,
+        pickable=True,
+        filled=True,
+        extruded=extruded,
         get_hexagon="h3_index",
         get_fill_color=[58, 27, 47, 200],
         get_line_color=[0, 0, 0, 0],
@@ -149,6 +442,7 @@ def create_indicative_area_layer(data, extruded: bool, zoom_level: int, layer_op
         visible=True,
         opacity=float(layer_opacity),
     )
+
 
 def create_layers_by_zoom(
     data_hex_df,
@@ -161,16 +455,37 @@ def create_layers_by_zoom(
     # Verwacht hier een DataFrame (geen list[dict])
     layers = []
     if zoom_level <= 3:
-        layers.append(create_main_layer(data_hex_df, show_main, extruded, zoom_level, 0.01, layer_opacity))
+        layers.append(
+            create_main_layer(
+                data_hex_df, show_main, extruded, zoom_level, 0.01, layer_opacity
+            )
+        )
     elif 4 <= zoom_level <= 7:
-        layers.append(create_main_layer(data_hex_df, show_main, extruded, zoom_level, 0.05, layer_opacity))
+        layers.append(
+            create_main_layer(
+                data_hex_df, show_main, extruded, zoom_level, 0.05, layer_opacity
+            )
+        )
     elif 8 <= zoom_level <= 11:
-        layers.append(create_main_layer(data_hex_df, show_main, extruded, zoom_level, 0.08, layer_opacity))
+        layers.append(
+            create_main_layer(
+                data_hex_df, show_main, extruded, zoom_level, 0.08, layer_opacity
+            )
+        )
     elif zoom_level == 12:
-        layers.append(create_main_layer(data_hex_df, show_main, extruded, zoom_level, 0.10, layer_opacity))
+        layers.append(
+            create_main_layer(
+                data_hex_df, show_main, extruded, zoom_level, 0.10, layer_opacity
+            )
+        )
     else:  # zoom_level >= 13
-        layers.append(create_main_layer(data_hex_df, show_main, extruded, zoom_level, 0.12, layer_opacity))
+        layers.append(
+            create_main_layer(
+                data_hex_df, show_main, extruded, zoom_level, 0.12, layer_opacity
+            )
+        )
     return layers
+
 
 # ------------------------------------------------------------
 # Sites (H3 contour + scatter markers)
@@ -204,54 +519,70 @@ def create_site_layers(
         hexes = r.get("coverage_hexes") or []
 
         for poly in polygons:
-            polygon_records.append({
-                "polygon": poly,
-                "site_rank": site_rank,
-                "fill_color": base_fill,
-                "line_color": base_line,
-                "site_rank_label": coverage_summary.get("site_rank_label", site_rank),
-                "woonplaats": r.get("woonplaats", ""),
-                "cluster_buildings": r.get("cluster_buildings"),
-                "cap_buildings": r.get("cap_buildings"),
-                "connected_buildings": r.get("connected_buildings"),
-                "cluster_MWh": r.get("cluster_MWh"),
-                "cap_MWh": r.get("cap_MWh"),
-                "connected_MWh": r.get("connected_MWh"),
-                "utilization_pct": r.get("utilization_pct"),
-                "cluster_buildings_fmt": r.get("cluster_buildings_fmt"),
-                "cap_buildings_fmt": r.get("cap_buildings_fmt"),
-                "connected_buildings_fmt": r.get("connected_buildings_fmt"),
-                "cluster_MWh_fmt": r.get("cluster_MWh_fmt"),
-                "cap_MWh_fmt": r.get("cap_MWh_fmt"),
-                "connected_MWh_fmt": r.get("connected_MWh_fmt"),
-                "utilization_pct_fmt": r.get("utilization_pct_fmt"),
-                # aggregaties voor tooltip
-                "aantal_huizen": coverage_summary.get("aantal_huizen"),
-                "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
-                "gemiddeld_jaarverbruik_mWh_r": coverage_summary.get("gemiddeld_jaarverbruik_mWh_r"),
-                "area_ha_r": coverage_summary.get("area_ha_r"),
-                "area_m2": coverage_summary.get("area_m2"),
-                "totale_oppervlakte": coverage_summary.get("totale_oppervlakte"),
-                "area_ha_total": coverage_summary.get("area_ha_total"),
-                "area_ha_total_fmt": coverage_summary.get("area_ha_total_fmt"),
-                "area_m2_total": coverage_summary.get("area_m2_total"),
-                "area_m2_total_fmt": coverage_summary.get("area_m2_total_fmt"),
-                "kWh_per_m2": coverage_summary.get("kWh_per_m2"),
-                "MWh_per_ha_r": coverage_summary.get("MWh_per_ha_r"),
-                "bouwjaar": coverage_summary.get("bouwjaar"),
-                "aantal_huizen_fmt": coverage_summary.get("aantal_huizen_fmt"),
-                "aantal_VBOs_fmt": coverage_summary.get("aantal_VBOs_fmt"),
-                "gemiddeld_jaarverbruik_mWh_r_fmt": coverage_summary.get("gemiddeld_jaarverbruik_mWh_r_fmt"),
-                "area_ha_r_fmt": coverage_summary.get("area_ha_r_fmt"),
-                "area_m2_fmt": coverage_summary.get("area_m2_fmt"),
-                "totale_oppervlakte_fmt": coverage_summary.get("totale_oppervlakte_fmt"),
-                "kWh_per_m2_fmt": coverage_summary.get("kWh_per_m2_fmt"),
-                "MWh_per_ha_r_fmt": coverage_summary.get("MWh_per_ha_r_fmt"),
-                "bouwjaar_fmt": coverage_summary.get("bouwjaar_fmt"),
-                "hex_section_display": coverage_summary.get("hex_section_display", "block"),
-                "site_section_display": coverage_summary.get("site_section_display", "block"),
-                "geo_section_display": coverage_summary.get("geo_section_display", "none"),
-            })
+            polygon_records.append(
+                {
+                    "polygon": poly,
+                    "site_rank": site_rank,
+                    "fill_color": base_fill,
+                    "line_color": base_line,
+                    "site_rank_label": coverage_summary.get(
+                        "site_rank_label", site_rank
+                    ),
+                    "woonplaats": r.get("woonplaats", ""),
+                    "cluster_buildings": r.get("cluster_buildings"),
+                    "cap_buildings": r.get("cap_buildings"),
+                    "connected_buildings": r.get("connected_buildings"),
+                    "cluster_MWh": r.get("cluster_MWh"),
+                    "cap_MWh": r.get("cap_MWh"),
+                    "connected_MWh": r.get("connected_MWh"),
+                    "utilization_pct": r.get("utilization_pct"),
+                    "cluster_buildings_fmt": r.get("cluster_buildings_fmt"),
+                    "cap_buildings_fmt": r.get("cap_buildings_fmt"),
+                    "connected_buildings_fmt": r.get("connected_buildings_fmt"),
+                    "cluster_MWh_fmt": r.get("cluster_MWh_fmt"),
+                    "cap_MWh_fmt": r.get("cap_MWh_fmt"),
+                    "connected_MWh_fmt": r.get("connected_MWh_fmt"),
+                    "utilization_pct_fmt": r.get("utilization_pct_fmt"),
+                    # aggregaties voor tooltip
+                    "aantal_huizen": coverage_summary.get("aantal_huizen"),
+                    "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
+                    "gemiddeld_jaarverbruik_mWh_r": coverage_summary.get(
+                        "gemiddeld_jaarverbruik_mWh_r"
+                    ),
+                    "area_ha_r": coverage_summary.get("area_ha_r"),
+                    "area_m2": coverage_summary.get("area_m2"),
+                    "totale_oppervlakte": coverage_summary.get("totale_oppervlakte"),
+                    "area_ha_total": coverage_summary.get("area_ha_total"),
+                    "area_ha_total_fmt": coverage_summary.get("area_ha_total_fmt"),
+                    "area_m2_total": coverage_summary.get("area_m2_total"),
+                    "area_m2_total_fmt": coverage_summary.get("area_m2_total_fmt"),
+                    "kWh_per_m2": coverage_summary.get("kWh_per_m2"),
+                    "MWh_per_ha_r": coverage_summary.get("MWh_per_ha_r"),
+                    "bouwjaar": coverage_summary.get("bouwjaar"),
+                    "aantal_huizen_fmt": coverage_summary.get("aantal_huizen_fmt"),
+                    "aantal_VBOs_fmt": coverage_summary.get("aantal_VBOs_fmt"),
+                    "gemiddeld_jaarverbruik_mWh_r_fmt": coverage_summary.get(
+                        "gemiddeld_jaarverbruik_mWh_r_fmt"
+                    ),
+                    "area_ha_r_fmt": coverage_summary.get("area_ha_r_fmt"),
+                    "area_m2_fmt": coverage_summary.get("area_m2_fmt"),
+                    "totale_oppervlakte_fmt": coverage_summary.get(
+                        "totale_oppervlakte_fmt"
+                    ),
+                    "kWh_per_m2_fmt": coverage_summary.get("kWh_per_m2_fmt"),
+                    "MWh_per_ha_r_fmt": coverage_summary.get("MWh_per_ha_r_fmt"),
+                    "bouwjaar_fmt": coverage_summary.get("bouwjaar_fmt"),
+                    "hex_section_display": coverage_summary.get(
+                        "hex_section_display", "block"
+                    ),
+                    "site_section_display": coverage_summary.get(
+                        "site_section_display", "block"
+                    ),
+                    "geo_section_display": coverage_summary.get(
+                        "geo_section_display", "none"
+                    ),
+                }
+            )
 
         for cov in hexes:
             cov_rec = dict(cov)
@@ -261,34 +592,38 @@ def create_site_layers(
             hexagon_records.append(cov_rec)
 
     if polygon_records:
-        site_layers.append(pdk.Layer(
-            "PolygonLayer",
-            polygon_records,
-            pickable=True,
-            stroked=True,
-            filled=False,
-            extruded=False,
-            wireframe=False,
-            get_polygon="polygon",
-            get_fill_color=[0, 0, 0, 0],
-            get_line_color=[0, 0, 0, 180],
-            lineWidthMinPixels=2.5,
-            lineWidthMaxPixels=10,
-            opacity=1.0,
-        ))
+        site_layers.append(
+            pdk.Layer(
+                "PolygonLayer",
+                polygon_records,
+                pickable=True,
+                stroked=True,
+                filled=False,
+                extruded=False,
+                wireframe=False,
+                get_polygon="polygon",
+                get_fill_color=[0, 0, 0, 0],
+                get_line_color=[0, 0, 0, 180],
+                lineWidthMinPixels=2.5,
+                lineWidthMaxPixels=10,
+                opacity=1.0,
+            )
+        )
 
     if hexagon_records:
-        site_layers.append(pdk.Layer(
-            "H3HexagonLayer",
-            hexagon_records,
-            pickable=True,
-            filled=True,
-            stroked=False,
-            extruded=False,
-            get_hexagon="h3_index",
-            get_fill_color="fill_color",
-            opacity=float(site_hex_opacity),
-        ))
+        site_layers.append(
+            pdk.Layer(
+                "H3HexagonLayer",
+                hexagon_records,
+                pickable=True,
+                filled=True,
+                stroked=False,
+                extruded=False,
+                get_hexagon="h3_index",
+                get_fill_color="fill_color",
+                opacity=float(site_hex_opacity),
+            )
+        )
 
     # Scatter markers: gebruik 'costed' records indien aanwezig
     use_records = _to_records(sites_costed) if sites_costed is not None else records
@@ -312,78 +647,89 @@ def create_site_layers(
         connected_MWh = r.get("connected_MWh")
         utilization_pct = r.get("utilization_pct")
 
-        scatter_records.append({
-            "lon": lon,
-            "lat": lat,
-            "woonplaats": r.get("woonplaats", ""),
-            "site_rank": site_rank,
-
-            # raw
-            "cluster_buildings": cluster_buildings,
-            "cap_buildings": cap_buildings,
-            "connected_buildings": connected_buildings,
-            "cluster_MWh": cluster_MWh,
-            "cap_MWh": cap_MWh,
-            "connected_MWh": connected_MWh,
-            "utilization_pct": utilization_pct,
-            "area_ha": coverage_summary.get("area_ha_r"),
-            "area_ha_fmt": coverage_summary.get("area_ha_r_fmt"),
-            "area_m2": coverage_summary.get("area_m2"),
-            "area_m2_fmt": coverage_summary.get("area_m2_fmt"),
-            "area_ha_total": coverage_summary.get("area_ha_total"),
-            "area_ha_total_fmt": coverage_summary.get("area_ha_total_fmt"),
-            "area_m2_total": coverage_summary.get("area_m2_total"),
-            "area_m2_total_fmt": coverage_summary.get("area_m2_total_fmt"),
-
-            # formatted for tooltip (maak ze indien niet aanwezig)
-            "cluster_buildings_fmt": r.get("cluster_buildings_fmt") or _fmt0(cluster_buildings),
-            "cap_buildings_fmt": r.get("cap_buildings_fmt") or _fmt0(cap_buildings),
-            "connected_buildings_fmt": r.get("connected_buildings_fmt") or _fmt0(connected_buildings),
-            "cluster_MWh_fmt": r.get("cluster_MWh_fmt") or _fmt0(cluster_MWh),
-            "cap_MWh_fmt": r.get("cap_MWh_fmt") or _fmt0(cap_MWh),
-            "connected_MWh_fmt": r.get("connected_MWh_fmt") or _fmt0(connected_MWh),
-            "utilization_pct_fmt": r.get("utilization_pct_fmt") or (str(int(utilization_pct)) if utilization_pct is not None else ""),
-
-            # display-velden voor tooltip-secties
-            "hex_section_display": coverage_summary.get("hex_section_display", r.get("hex_section_display", "none")),
-            "site_section_display": r.get("site_section_display", "block"),
-            "geo_section_display": r.get("geo_section_display", "none"),
-
-            # aggregated hex data
-            "aantal_huizen": coverage_summary.get("aantal_huizen"),
-            "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
-            "gemiddeld_jaarverbruik_mWh_r": coverage_summary.get("gemiddeld_jaarverbruik_mWh_r"),
-            "area_ha_r": coverage_summary.get("area_ha_r"),
-            "totale_oppervlakte": coverage_summary.get("totale_oppervlakte"),
-            "kWh_per_m2": coverage_summary.get("kWh_per_m2"),
-            "MWh_per_ha_r": coverage_summary.get("MWh_per_ha_r"),
-            "bouwjaar": coverage_summary.get("bouwjaar"),
-            "aantal_huizen_fmt": coverage_summary.get("aantal_huizen_fmt"),
-            "aantal_VBOs_fmt": coverage_summary.get("aantal_VBOs_fmt"),
-            "gemiddeld_jaarverbruik_mWh_r_fmt": coverage_summary.get("gemiddeld_jaarverbruik_mWh_r_fmt"),
-            "area_ha_r_fmt": coverage_summary.get("area_ha_r_fmt"),
-            "totale_oppervlakte_fmt": coverage_summary.get("totale_oppervlakte_fmt"),
-            "kWh_per_m2_fmt": coverage_summary.get("kWh_per_m2_fmt"),
-            "MWh_per_ha_r_fmt": coverage_summary.get("MWh_per_ha_r_fmt"),
-            "bouwjaar_fmt": coverage_summary.get("bouwjaar_fmt"),
-            "site_rank_label": coverage_summary.get("site_rank_label", site_rank),
-
-            "fill_color": color,
-        })
+        scatter_records.append(
+            {
+                "lon": lon,
+                "lat": lat,
+                "woonplaats": r.get("woonplaats", ""),
+                "site_rank": site_rank,
+                # raw
+                "cluster_buildings": cluster_buildings,
+                "cap_buildings": cap_buildings,
+                "connected_buildings": connected_buildings,
+                "cluster_MWh": cluster_MWh,
+                "cap_MWh": cap_MWh,
+                "connected_MWh": connected_MWh,
+                "utilization_pct": utilization_pct,
+                "area_ha": coverage_summary.get("area_ha_r"),
+                "area_ha_fmt": coverage_summary.get("area_ha_r_fmt"),
+                "area_m2": coverage_summary.get("area_m2"),
+                "area_m2_fmt": coverage_summary.get("area_m2_fmt"),
+                "area_ha_total": coverage_summary.get("area_ha_total"),
+                "area_ha_total_fmt": coverage_summary.get("area_ha_total_fmt"),
+                "area_m2_total": coverage_summary.get("area_m2_total"),
+                "area_m2_total_fmt": coverage_summary.get("area_m2_total_fmt"),
+                # formatted for tooltip (maak ze indien niet aanwezig)
+                "cluster_buildings_fmt": r.get("cluster_buildings_fmt")
+                or _fmt0(cluster_buildings),
+                "cap_buildings_fmt": r.get("cap_buildings_fmt") or _fmt0(cap_buildings),
+                "connected_buildings_fmt": r.get("connected_buildings_fmt")
+                or _fmt0(connected_buildings),
+                "cluster_MWh_fmt": r.get("cluster_MWh_fmt") or _fmt0(cluster_MWh),
+                "cap_MWh_fmt": r.get("cap_MWh_fmt") or _fmt0(cap_MWh),
+                "connected_MWh_fmt": r.get("connected_MWh_fmt") or _fmt0(connected_MWh),
+                "utilization_pct_fmt": r.get("utilization_pct_fmt")
+                or (str(int(utilization_pct)) if utilization_pct is not None else ""),
+                # display-velden voor tooltip-secties
+                "hex_section_display": coverage_summary.get(
+                    "hex_section_display", r.get("hex_section_display", "none")
+                ),
+                "site_section_display": r.get("site_section_display", "block"),
+                "geo_section_display": r.get("geo_section_display", "none"),
+                # aggregated hex data
+                "aantal_huizen": coverage_summary.get("aantal_huizen"),
+                "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
+                "gemiddeld_jaarverbruik_mWh_r": coverage_summary.get(
+                    "gemiddeld_jaarverbruik_mWh_r"
+                ),
+                "area_ha_r": coverage_summary.get("area_ha_r"),
+                "totale_oppervlakte": coverage_summary.get("totale_oppervlakte"),
+                "kWh_per_m2": coverage_summary.get("kWh_per_m2"),
+                "MWh_per_ha_r": coverage_summary.get("MWh_per_ha_r"),
+                "bouwjaar": coverage_summary.get("bouwjaar"),
+                "aantal_huizen_fmt": coverage_summary.get("aantal_huizen_fmt"),
+                "aantal_VBOs_fmt": coverage_summary.get("aantal_VBOs_fmt"),
+                "gemiddeld_jaarverbruik_mWh_r_fmt": coverage_summary.get(
+                    "gemiddeld_jaarverbruik_mWh_r_fmt"
+                ),
+                "area_ha_r_fmt": coverage_summary.get("area_ha_r_fmt"),
+                "totale_oppervlakte_fmt": coverage_summary.get(
+                    "totale_oppervlakte_fmt"
+                ),
+                "kWh_per_m2_fmt": coverage_summary.get("kWh_per_m2_fmt"),
+                "MWh_per_ha_r_fmt": coverage_summary.get("MWh_per_ha_r_fmt"),
+                "bouwjaar_fmt": coverage_summary.get("bouwjaar_fmt"),
+                "site_rank_label": coverage_summary.get("site_rank_label", site_rank),
+                "fill_color": color,
+            }
+        )
 
     if scatter_records:
-        site_layers.append(pdk.Layer(
-            "ScatterplotLayer",
-            scatter_records,
-            pickable=True,
-            get_position=["lon", "lat"],
-            get_radius=25,
-            get_fill_color="fill_color",
-            radius_min_pixels=6,
-            radius_max_pixels=10
-        ))
+        site_layers.append(
+            pdk.Layer(
+                "ScatterplotLayer",
+                scatter_records,
+                pickable=True,
+                get_position=["lon", "lat"],
+                get_radius=25,
+                get_fill_color="fill_color",
+                radius_min_pixels=6,
+                radius_max_pixels=10,
+            )
+        )
 
     return site_layers
+
 
 # ------------------------------------------------------------
 # Woonlagen (energiearmoede/koop/corporatie)
@@ -404,6 +750,7 @@ def _geojson_layer(data, name, fill_color, line_color, opacity=0.5):
         lineWidthMinPixels=1,
         opacity=float(opacity),
     )
+
 
 def create_extra_layers(
     geojson_dict: dict,
@@ -426,52 +773,76 @@ def create_extra_layers(
     if st.session_state.get(cfg["energiearmoede"]["toggle_key"]):
         c = cfg["energiearmoede"]
         colors = get_layer_colors(c)
-        gjson_src = filter_geojson_by_selection(geojson_dict.get("energiearmoede"), woonplaats_selectie, zoom_level)
+        gjson_src = filter_geojson_by_selection(
+            geojson_dict.get("energiearmoede"), woonplaats_selectie, zoom_level
+        )
         gjson_colored = colorize_geojson_cached(
-            gjson_src, c["prop_name"], c["out_prop"], c["breaks"], colors,
+            gjson_src,
+            c["prop_name"],
+            c["out_prop"],
+            c["breaks"],
+            colors,
             layer_label=c["legend_title"],
         )
         lyr = _geojson_layer(
-            gjson_colored, "energiearmoede",
+            gjson_colored,
+            "energiearmoede",
             fill_color=f"properties.{c['out_prop']}",
             line_color=c["line_color"],
             opacity=st.session_state.get("extra_opacity", extra_opacity),
         )
-        if lyr: layers.append(lyr)
+        if lyr:
+            layers.append(lyr)
 
     # Koopwoningen
     if st.session_state.get(cfg["koopwoningen"]["toggle_key"]):
         c = cfg["koopwoningen"]
         colors = get_layer_colors(c)
-        gjson_src = filter_geojson_by_selection(geojson_dict.get("koopwoningen"), woonplaats_selectie, zoom_level)
+        gjson_src = filter_geojson_by_selection(
+            geojson_dict.get("koopwoningen"), woonplaats_selectie, zoom_level
+        )
         gjson_colored = colorize_geojson_cached(
-            gjson_src, c["prop_name"], c["out_prop"], c["breaks"], colors,
+            gjson_src,
+            c["prop_name"],
+            c["out_prop"],
+            c["breaks"],
+            colors,
             layer_label=c["legend_title"],
         )
         lyr = _geojson_layer(
-            gjson_colored, "koopwoningen",
+            gjson_colored,
+            "koopwoningen",
             fill_color=f"properties.{c['out_prop']}",
             line_color=c["line_color"],
             opacity=st.session_state.get("extra_opacity", extra_opacity),
         )
-        if lyr: layers.append(lyr)
+        if lyr:
+            layers.append(lyr)
 
     # Wooncorporatie
     if st.session_state.get(cfg["wooncorporatie"]["toggle_key"]):
         c = cfg["wooncorporatie"]
         colors = get_layer_colors(c)
-        gjson_src = filter_geojson_by_selection(geojson_dict.get("corporatie"), woonplaats_selectie, zoom_level)
+        gjson_src = filter_geojson_by_selection(
+            geojson_dict.get("corporatie"), woonplaats_selectie, zoom_level
+        )
         gjson_colored = colorize_geojson_cached(
-            gjson_src, c["prop_name"], c["out_prop"], c["breaks"], colors,
+            gjson_src,
+            c["prop_name"],
+            c["out_prop"],
+            c["breaks"],
+            colors,
             layer_label=c["legend_title"],
         )
         lyr = _geojson_layer(
-            gjson_colored, "wooncorporatie",
+            gjson_colored,
+            "wooncorporatie",
             fill_color=f"properties.{c['out_prop']}",
             line_color=c["line_color"],
             opacity=st.session_state.get("extra_opacity", extra_opacity),
         )
-        if lyr: layers.append(lyr)
+        if lyr:
+            layers.append(lyr)
 
     # Waterpotentie
     if st.session_state.get(cfg["water_potentie"]["toggle_key"]):
@@ -494,7 +865,9 @@ def create_extra_layers(
                 "water_potentie",
                 fill_color=f"properties.{cfg['water_potentie']['out_prop']}",
                 line_color=cfg["water_potentie"].get("line_color", [255, 255, 255, 60]),
-                opacity=st.session_state.get("water_potentie_opacity", meta.get("default_opacity", 0.7)),
+                opacity=st.session_state.get(
+                    "water_potentie_opacity", meta.get("default_opacity", 0.7)
+                ),
             )
             if lyr:
                 layers.append(lyr)
@@ -524,12 +897,15 @@ def create_extra_layers(
                 "buurt_potentie",
                 fill_color=f"properties.{cfg['buurt_potentie']['out_prop']}",
                 line_color=cfg["wooncorporatie"].get("line_color", [0, 0, 0, 120]),
-                opacity=st.session_state.get("buurt_potentie_opacity", meta.get("default_opacity", 0.7)),
+                opacity=st.session_state.get(
+                    "buurt_potentie_opacity", meta.get("default_opacity", 0.7)
+                ),
             )
             if lyr:
                 layers.append(lyr)
 
     return layers
+
 
 # ------------------------------------------------------------
 # Wegennet (vraagkant)
@@ -555,7 +931,9 @@ def create_wegennet_layers(
     layer_label = cfg.get("legend_title", "Wegennet")
     line_width = float(cfg.get("line_width", 2.0))
 
-    allowed_types_set = {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    allowed_types_set = (
+        {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    )
     wp_filter = {str(w).strip().lower() for w in woonplaatsen} if woonplaatsen else None
 
     feats: list[dict] = []
@@ -564,7 +942,9 @@ def create_wegennet_layers(
         if not isinstance(feat, dict):
             continue
         props = dict(feat.get("properties") or {})
-        woonplaats = str(props.get("area_name") or props.get("woonplaats") or "").strip()
+        woonplaats = str(
+            props.get("area_name") or props.get("woonplaats") or ""
+        ).strip()
         if wp_filter and woonplaats.lower() not in wp_filter:
             continue
         type_raw = str(props.get("type") or "").strip().lower()
@@ -587,7 +967,9 @@ def create_wegennet_layers(
             rows.append(f"<div class='tooltip-row'>Type: {type_label}</div>")
         if woonplaats:
             rows.append(f"<div class='tooltip-row'>Woonplaats: {woonplaats}</div>")
-        rows.append(f"<div class='tooltip-row'>Lengte wegdeel (m): {length_display}</div>")
+        rows.append(
+            f"<div class='tooltip-row'>Lengte wegdeel (m): {length_display}</div>"
+        )
 
         props["woonplaats"] = woonplaats
         props["_layer_label"] = layer_label
@@ -620,11 +1002,13 @@ def create_wegennet_layers(
     )
     return [layer]
 
+
 # ------------------------------------------------------------
 # Warmtenet model (bronnen + leidingen)
 # ------------------------------------------------------------
 def _warmtenet_extra_rows(props: dict) -> str:
     """Stel tooltip-rijen samen voor de warmtenetlaag."""
+
     def _to_float(val):
         try:
             num = float(val)
@@ -640,7 +1024,9 @@ def _warmtenet_extra_rows(props: dict) -> str:
             return None
         return format_dutch_number(num, decimals)
 
-    def _add_row(label: str, value, *, decimals: int = 1, suffix: str = "", prefix: str = ""):
+    def _add_row(
+        label: str, value, *, decimals: int = 1, suffix: str = "", prefix: str = ""
+    ):
         fmt_val = _fmt(value, decimals=decimals)
         suffix_txt = f" {suffix}" if suffix else ""
         display = f"{prefix}{fmt_val}{suffix_txt}" if fmt_val is not None else "-"
@@ -653,16 +1039,23 @@ def _warmtenet_extra_rows(props: dict) -> str:
 
     rows = []
     layer_raw = str(props.get("layer") or "").strip().lower()
-    geom_type = str(props.get("_geometry_type") or "").strip().lower()  # optional helper
+    geom_type = (
+        str(props.get("_geometry_type") or "").strip().lower()
+    )  # optional helper
     layer_type = layer_raw
     if layer_type not in {"bron", "object", "leiding"}:
         if geom_type == "linestring":
             layer_type = "leiding"
-        elif props.get("bron_mwh_per_jaar") is not None or props.get("ingezet_mwh_per_jaar") is not None:
+        elif (
+            props.get("bron_mwh_per_jaar") is not None
+            or props.get("ingezet_mwh_per_jaar") is not None
+        ):
             layer_type = "bron"
         elif props.get("vraag_mwh_per_jaar") is not None:
             layer_type = "object"
-    layer_label = {"bron": "Bron", "object": "Object", "leiding": "Leiding"}.get(layer_type)
+    layer_label = {"bron": "Bron", "object": "Object", "leiding": "Leiding"}.get(
+        layer_type
+    )
     woonplaats = props.get("woonplaats")
     bron_id = props.get("bron_id") or props.get("bron_key")
     gegevensbron = props.get("type_bron") or props.get("gegevensbron")
@@ -677,9 +1070,15 @@ def _warmtenet_extra_rows(props: dict) -> str:
         rows.append(f"<div class='tooltip-row'>Gegevensbron: {gegevensbron}</div>")
 
     if layer_type == "bron":
-        _add_row("Beschikbare warmte (MWh/jaar)", props.get("bron_mwh_per_jaar"), decimals=0)
-        _add_row("Ingezette warmte (MWh/jaar)", props.get("ingezet_mwh_per_jaar"), decimals=0)
-        _add_row("Benutting percentage", props.get("benutting_pct"), decimals=1, suffix="%")
+        _add_row(
+            "Beschikbare warmte (MWh/jaar)", props.get("bron_mwh_per_jaar"), decimals=0
+        )
+        _add_row(
+            "Ingezette warmte (MWh/jaar)", props.get("ingezet_mwh_per_jaar"), decimals=0
+        )
+        _add_row(
+            "Benutting percentage", props.get("benutting_pct"), decimals=1, suffix="%"
+        )
         _add_row("Aangesloten objecten", props.get("aangesloten_objecten"), decimals=0)
         _add_currency("Kosten bron", props.get("kosten_bron_euro"))
         _add_currency("Kosten aansluitingen", props.get("kosten_aansluitingen_euro"))
@@ -694,7 +1093,9 @@ def _warmtenet_extra_rows(props: dict) -> str:
     return "".join(rows)
 
 
-def _prepare_warmtenet_props(props: dict, *, color: list[int], layer_label: str) -> dict:
+def _prepare_warmtenet_props(
+    props: dict, *, color: list[int], layer_label: str
+) -> dict:
     """Verrijk properties voor tooltip en kleurgebruik."""
     prepared = dict(props or {})
     prepared["color"] = color
@@ -743,9 +1144,13 @@ def create_warmtenet_layers(
         return tuple(hashed)
 
     allowed = {str(k).strip() for k in allowed_keys} if allowed_keys else None
-    allowed_types_set = {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    allowed_types_set = (
+        {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    )
     wp_filter = {str(w).strip().lower() for w in woonplaatsen} if woonplaatsen else None
-    layer_label = LAYER_CFG.get("warmtenet_model", {}).get("legend_title", "Warmtebronnen (model)")
+    layer_label = LAYER_CFG.get("warmtenet_model", {}).get(
+        "legend_title", "Warmtebronnen (model)"
+    )
     default_color = [120, 120, 120, 220]
 
     line_feats = []
@@ -767,7 +1172,9 @@ def create_warmtenet_layers(
             if str(tb).strip().lower() not in allowed_types_set:
                 continue
         color = color_map.get(bron_key, default_color)
-        prepared_props = _prepare_warmtenet_props(props, color=color, layer_label=layer_label)
+        prepared_props = _prepare_warmtenet_props(
+            props, color=color, layer_label=layer_label
+        )
 
         geom = feat.get("geometry") or {}
         geom_type = geom.get("type")
@@ -775,7 +1182,10 @@ def create_warmtenet_layers(
         if layer_type not in {"bron", "object", "leiding"}:
             if geom_type == "LineString":
                 layer_type = "leiding"
-            elif props.get("bron_mwh_per_jaar") is not None or props.get("ingezet_mwh_per_jaar") is not None:
+            elif (
+                props.get("bron_mwh_per_jaar") is not None
+                or props.get("ingezet_mwh_per_jaar") is not None
+            ):
                 layer_type = "bron"
             elif props.get("vraag_mwh_per_jaar") is not None:
                 layer_type = "object"
@@ -799,17 +1209,23 @@ def create_warmtenet_layers(
 
     for prepared_props, geom, _ in filtered_feats:
         geom_type = geom.get("type")
-        layer_type = str(prepared_props.get("_layer_type") or prepared_props.get("layer") or "").strip().lower()
+        layer_type = (
+            str(prepared_props.get("_layer_type") or prepared_props.get("layer") or "")
+            .strip()
+            .lower()
+        )
         prepared_props["_geometry_type"] = str(geom_type or "").strip()
         point_radius = 12 if layer_type == "bron" else 6
-        point_line_width = 3.0 if layer_type == "bron" else 2.2  # dikkere rand voor zichtbaarheid
+        point_line_width = (
+            3.0 if layer_type == "bron" else 2.2
+        )  # dikkere rand voor zichtbaarheid
         base_color = prepared_props.get("color", default_color)
         if layer_type == "object":
             fill_color = [255, 255, 255, 235]  # wit binnenvlak
-            line_color = base_color           # gekleurde rand
+            line_color = base_color  # gekleurde rand
         else:
             fill_color = base_color
-            line_color = [25, 25, 25, 210]    # donkere rand voor contrast
+            line_color = [25, 25, 25, 210]  # donkere rand voor contrast
         if geom_type == "Point":
             coords = geom.get("coordinates") or [None, None]
             record = {
@@ -829,41 +1245,47 @@ def create_warmtenet_layers(
             props_with_width = dict(prepared_props)
             props_with_width["line_overlap"] = overlap
             props_with_width["line_width"] = width
-            line_feats.append({
-                "type": "Feature",
-                "properties": props_with_width,
-                "geometry": geom,
-            })
+            line_feats.append(
+                {
+                    "type": "Feature",
+                    "properties": props_with_width,
+                    "geometry": geom,
+                }
+            )
 
     layers = []
     if line_feats:
-        layers.append(pdk.Layer(
-            "GeoJsonLayer",
-            data={"type": "FeatureCollection", "features": line_feats},
-            pickable=True,
-            stroked=True,
-            filled=False,
-            get_line_color=[0, 0, 0, 220],
-            get_line_width="properties.line_width",
-            lineWidthMinPixels=2,
-            opacity=float(opacity),
-        ))
+        layers.append(
+            pdk.Layer(
+                "GeoJsonLayer",
+                data={"type": "FeatureCollection", "features": line_feats},
+                pickable=True,
+                stroked=True,
+                filled=False,
+                get_line_color=[0, 0, 0, 220],
+                get_line_width="properties.line_width",
+                lineWidthMinPixels=2,
+                opacity=float(opacity),
+            )
+        )
 
     if point_records:
-        layers.append(pdk.Layer(
-            "ScatterplotLayer",
-            point_records,
-            pickable=True,
-            get_position="position",
-            get_fill_color="fill_color",
-            get_line_color="line_color",
-            get_line_width="point_line_width",
-            get_radius="point_radius",
-            radius_units="pixels",
-            radius_min_pixels=4,
-            radius_max_pixels=18,
-            stroked=True,
-            opacity=float(opacity),
-        ))
+        layers.append(
+            pdk.Layer(
+                "ScatterplotLayer",
+                point_records,
+                pickable=True,
+                get_position="position",
+                get_fill_color="fill_color",
+                get_line_color="line_color",
+                get_line_width="point_line_width",
+                get_radius="point_radius",
+                radius_units="pixels",
+                radius_min_pixels=4,
+                radius_max_pixels=18,
+                stroked=True,
+                opacity=float(opacity),
+            )
+        )
 
     return layers
