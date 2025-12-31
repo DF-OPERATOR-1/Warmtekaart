@@ -43,7 +43,13 @@ def _load_source() -> pd.DataFrame:
     df = pd.read_parquet(SRC_PATH, columns=list(COLUMNS))
 
     # Compacte dtypes
-    for col in ["latitude", "longitude", "kWh_per_m2", "gemiddeld_jaarverbruik", "gemiddeld_jaarverbruik_mWh"]:
+    for col in [
+        "latitude",
+        "longitude",
+        "kWh_per_m2",
+        "gemiddeld_jaarverbruik",
+        "gemiddeld_jaarverbruik_mWh",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("float32")
 
@@ -64,13 +70,13 @@ def _compute_h3_columns(df: pd.DataFrame) -> pd.DataFrame:
     base_res = 12
     df["h3_r12"] = [
         h3.latlng_to_cell(float(lat), float(lon), base_res)
-        if pd.notna(lat) and pd.notna(lon) else None
+        if pd.notna(lat) and pd.notna(lon)
+        else None
         for lat, lon in zip(lat_np, lon_np)
     ]
     for res in (11, 10, 9):
         df[f"h3_r{res}"] = [
-            h3.cell_to_parent(h, res) if h else None
-            for h in df["h3_r12"]
+            h3.cell_to_parent(h, res) if h else None for h in df["h3_r12"]
         ]
     return df
 
@@ -79,14 +85,32 @@ def _aggregate(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     df["cnt"] = 1
-    df["sum_mwh"] = pd.to_numeric(df["gemiddeld_jaarverbruik_mWh"], errors="coerce").fillna(0).astype("float32")
-    df["sum_area"] = pd.to_numeric(df["totale_oppervlakte"], errors="coerce").fillna(0).astype("float32")
-    df["sum_kwh"] = pd.to_numeric(df["kWh_per_m2"], errors="coerce").fillna(0).astype("float32")
-    df["sum_vbos"] = pd.to_numeric(df["aantal_VBOs"], errors="coerce").fillna(0).astype("float32")
+    df["sum_mwh"] = (
+        pd.to_numeric(df["gemiddeld_jaarverbruik_mWh"], errors="coerce")
+        .fillna(0)
+        .astype("float32")
+    )
+    df["sum_area"] = (
+        pd.to_numeric(df["totale_oppervlakte"], errors="coerce")
+        .fillna(0)
+        .astype("float32")
+    )
+    df["sum_kwh"] = (
+        pd.to_numeric(df["kWh_per_m2"], errors="coerce").fillna(0).astype("float32")
+    )
+    df["sum_vbos"] = (
+        pd.to_numeric(df["aantal_VBOs"], errors="coerce").fillna(0).astype("float32")
+    )
 
-    df["lat"] = pd.to_numeric(df["latitude"], errors="coerce").fillna(0).astype("float32")
-    df["lon"] = pd.to_numeric(df["longitude"], errors="coerce").fillna(0).astype("float32")
-    df["sum_bouwjaar"] = pd.to_numeric(df["bouwjaar"], errors="coerce").fillna(0).astype("float32")
+    df["lat"] = (
+        pd.to_numeric(df["latitude"], errors="coerce").fillna(0).astype("float32")
+    )
+    df["lon"] = (
+        pd.to_numeric(df["longitude"], errors="coerce").fillna(0).astype("float32")
+    )
+    df["sum_bouwjaar"] = (
+        pd.to_numeric(df["bouwjaar"], errors="coerce").fillna(0).astype("float32")
+    )
 
     group_cols = [
         "h3_r12",
@@ -101,29 +125,39 @@ def _aggregate(df: pd.DataFrame) -> pd.DataFrame:
 
     agg = (
         df.groupby(group_cols, observed=True)
-          .agg(
-              sum_mwh=("sum_mwh", "sum"),
-              sum_area=("sum_area", "sum"),
-              sum_kwh=("sum_kwh", "sum"),
-              sum_vbos=("sum_vbos", "sum"),
-              cnt=("cnt", "sum"),
-              sum_lat=("lat", "sum"),
-              sum_lon=("lon", "sum"),
-              sum_bouwjaar=("sum_bouwjaar", "sum"),
-          )
-          .reset_index()
+        .agg(
+            sum_mwh=("sum_mwh", "sum"),
+            sum_area=("sum_area", "sum"),
+            sum_kwh=("sum_kwh", "sum"),
+            sum_vbos=("sum_vbos", "sum"),
+            cnt=("cnt", "sum"),
+            sum_lat=("lat", "sum"),
+            sum_lon=("lon", "sum"),
+            sum_bouwjaar=("sum_bouwjaar", "sum"),
+        )
+        .reset_index()
     )
 
-    # Gemiddelden voor UI (houd dezelfde kolomnamen als bron)
+    # UI (houd dezelfde kolomnamen aan als bron)
     with np.errstate(divide="ignore", invalid="ignore"):
         agg["kWh_per_m2"] = (agg["sum_kwh"] / agg["cnt"]).astype("float32")
-        agg["gemiddeld_jaarverbruik_mWh"] = (agg["sum_mwh"] / agg["cnt"]).astype("float32")
+        agg["gemiddeld_jaarverbruik_mWh"] = (agg["sum_mwh"] / agg["cnt"]).astype(
+            "float32"
+        )
         agg["totale_oppervlakte"] = (agg["sum_area"] / agg["cnt"]).astype("float32")
         agg["aantal_VBOs"] = (agg["sum_vbos"] / agg["cnt"]).astype("float32")
         agg["latitude"] = (agg["sum_lat"] / agg["cnt"]).astype("float32")
         agg["longitude"] = (agg["sum_lon"] / agg["cnt"]).astype("float32")
 
-    for col in ["sum_mwh", "sum_area", "sum_kwh", "sum_vbos", "sum_lat", "sum_lon", "sum_bouwjaar"]:
+    for col in [
+        "sum_mwh",
+        "sum_area",
+        "sum_kwh",
+        "sum_vbos",
+        "sum_lat",
+        "sum_lon",
+        "sum_bouwjaar",
+    ]:
         if col in agg.columns:
             agg[col] = agg[col].astype("float32")
 

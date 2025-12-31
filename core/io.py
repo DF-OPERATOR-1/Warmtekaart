@@ -4,6 +4,7 @@ import gzip
 from pathlib import Path
 import re
 import os
+import unicodedata
 
 import orjson
 import pandas as pd
@@ -21,7 +22,9 @@ from .config import (
     KOOPWONINGEN_PATH,
     WOONCORPORATIE_PATH,
     GJ_COMMON_PROPS,
+    WEGENNET_PATH,
 )
+
 
 # ============================================================
 # GeoJSON loader (met property-filter & coördinaat-precisie)
@@ -55,7 +58,7 @@ def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, tt
 
     feats = []
     kp = set(keep_props or [])
-    factor = 10 ** coord_precision
+    factor = 10**coord_precision
 
     def _round_coords(obj):
         if isinstance(obj, list):
@@ -70,7 +73,10 @@ def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, tt
         if kp:
             props = {k: props.get(k) for k in kp if k in props}
         if geom and geom.get("coordinates") is not None:
-            geom = {"type": geom.get("type"), "coordinates": _round_coords(geom.get("coordinates"))}
+            geom = {
+                "type": geom.get("type"),
+                "coordinates": _round_coords(geom.get("coordinates")),
+            }
         feats.append({"type": "Feature", "properties": props, "geometry": geom})
 
     return {"type": "FeatureCollection", "features": feats}
@@ -82,13 +88,16 @@ def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, tt
 CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def _is_url(x: str | Path) -> bool:
     s = str(x)
     return s.startswith("http://") or s.startswith("https://")
 
+
 def _is_gdrive(url: str) -> bool:
     u = url.lower()
     return ("drive.google.com" in u) or ("docs.google.com" in u)
+
 
 def _extract_gdrive_file_id(url: str) -> str | None:
     m = re.search(r"[?&]id=([a-zA-Z0-9_-]{10,})", url)
@@ -99,12 +108,15 @@ def _extract_gdrive_file_id(url: str) -> str | None:
         return m.group(1)
     return None
 
+
 def _gdrive_to_cache(url: str, filename_hint: str = "data_kWh.csv") -> Path:
     """Download 1x naar cache met gdown en retourneer lokaal pad."""
     try:
         import gdown  # lazy import
     except Exception as e:
-        raise RuntimeError("gdown is vereist voor Google Drive-URL's (voeg gdown>=5.1 toe aan requirements).") from e
+        raise RuntimeError(
+            "gdown is vereist voor Google Drive-URL's (voeg gdown>=5.1 toe aan requirements)."
+        ) from e
 
     file_id = _extract_gdrive_file_id(url)
     if not file_id:
@@ -114,9 +126,83 @@ def _gdrive_to_cache(url: str, filename_hint: str = "data_kWh.csv") -> Path:
     cache_path = CACHE_DIR / f"gdrive_{file_id}{suffix}"
 
     if not cache_path.exists():
-        gdown.download(f"https://drive.google.com/uc?id={file_id}", str(cache_path), quiet=False)
+        gdown.download(
+            f"https://drive.google.com/uc?id={file_id}", str(cache_path), quiet=False
+        )
 
     return cache_path
+
+
+def _slugify_name(value: str) -> str:
+    """Maak een bestandsveilige slug op basis van een naam."""
+    try:
+        text = unicodedata.normalize("NFKD", value)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    except Exception:
+        text = value
+    text = re.sub(r"[^a-zA-Z0-9]+", "_", str(text)).strip("_").lower()
+    return text or "onbekend"
+
+
+def resolve_wegennet_path(gemeente: str | None, base_path: Path | None = None) -> Path:
+    """Kies een gemeente-specifiek wegennetbestand als dat bestaat."""
+    base = base_path or WEGENNET_PATH
+    if not gemeente:
+        return base
+    name_raw = str(gemeente).strip()
+    if not name_raw:
+        return base
+    suffix = "".join(base.suffixes) or base.suffix or ".geojson.gz"
+    base_dir = base.parent
+    name_simple = re.sub(r"\s+", "_", name_raw.strip().lower())
+    variants = []
+    for val in (name_simple, _slugify_name(name_raw)):
+        if val and val not in variants:
+            variants.append(val)
+    candidates = []
+    for val in variants:
+        candidates.append(base_dir / f"wegennet_{val}{suffix}")
+        candidates.append(base_dir / "wegennet" / f"{val}{suffix}")
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return base
+
+
+@st.cache_data(show_spinner=False, max_entries=16, ttl=3600)
+def geojson_unique_props(path: str | Path, prop_name: str) -> list[str]:
+    """Lees unieke property-waarden uit een GeoJSON (zonder extra bewerkingen)."""
+    if not path:
+        return []
+    p = Path(path)
+    if not p.exists():
+        return []
+
+    if p.suffix == ".gz":
+        with gzip.open(p, "rb") as fh:
+            raw = fh.read()
+    else:
+        raw = p.read_bytes()
+
+    try:
+        gj = orjson.loads(raw)
+    except Exception:
+        gj = json.loads(raw.decode("utf-8"))
+
+    if not (gj and isinstance(gj, dict) and gj.get("type") == "FeatureCollection"):
+        return []
+
+    values = set()
+    for feat in gj.get("features", []) or []:
+        props = feat.get("properties") or {}
+        val = props.get(prop_name)
+        if val is None:
+            continue
+        txt = str(val).strip()
+        if txt:
+            values.add(txt)
+
+    return sorted(values)
 
 
 # ============================================================
@@ -132,7 +218,11 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
     """
     # ---------- Bron bepalen ----------
     if src is None or (isinstance(src, (str, Path)) and str(src).strip() == ""):
-        use_compact = os.getenv("WARMTE_USE_COMPACT", "").strip().lower() in {"1", "true", "yes"}
+        use_compact = os.getenv("WARMTE_USE_COMPACT", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         compact_candidate = DATA_CSV_PATH.parent / "data_kWh_compact.parquet"
         if use_compact and compact_candidate.exists():
             src = compact_candidate
@@ -154,10 +244,21 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
 
     # ---------- Kolommen & dtypes ----------
     usecols = [
-        "aantal_VBOs", "totale_oppervlakte", "woonplaats", "Energieklasse",
-        "latitude", "longitude", "bouwjaar", "pandstatus",
-        "kWh_per_m2", "gemiddeld_jaarverbruik", "Dataset", "gemiddeld_jaarverbruik_mWh",
-        "gemeentenaam", "afname_betekenis", "opwek_betekenis",
+        "aantal_VBOs",
+        "totale_oppervlakte",
+        "woonplaats",
+        "Energieklasse",
+        "latitude",
+        "longitude",
+        "bouwjaar",
+        "pandstatus",
+        "kWh_per_m2",
+        "gemiddeld_jaarverbruik",
+        "Dataset",
+        "gemiddeld_jaarverbruik_mWh",
+        "gemeentenaam",
+        "afname_betekenis",
+        "opwek_betekenis",
     ]
 
     csv_dtypes = {
@@ -187,14 +288,24 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
             df = pd.read_csv(read_target, low_memory=False, usecols=usecols)
 
     # ---------- Numerieke types afdwingen ----------
-    for c in ["latitude", "longitude", "kWh_per_m2", "gemiddeld_jaarverbruik_mWh", "gemiddeld_jaarverbruik"]:
+    for c in [
+        "latitude",
+        "longitude",
+        "kWh_per_m2",
+        "gemiddeld_jaarverbruik_mWh",
+        "gemiddeld_jaarverbruik",
+    ]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
 
     if "aantal_VBOs" in df.columns:
-        df["aantal_VBOs"] = pd.to_numeric(df["aantal_VBOs"], errors="coerce").astype("Int16")
+        df["aantal_VBOs"] = pd.to_numeric(df["aantal_VBOs"], errors="coerce").astype(
+            "Int16"
+        )
     if "totale_oppervlakte" in df.columns:
-        df["totale_oppervlakte"] = pd.to_numeric(df["totale_oppervlakte"], errors="coerce").astype("Int32")
+        df["totale_oppervlakte"] = pd.to_numeric(
+            df["totale_oppervlakte"], errors="coerce"
+        ).astype("Int32")
     if "bouwjaar" in df.columns:
         df["bouwjaar"] = pd.to_numeric(df["bouwjaar"], errors="coerce").astype("Int16")
 
@@ -220,7 +331,9 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
 
-    drop_optional = [c for c in ["afname_betekenis", "opwek_betekenis"] if c in df.columns]
+    drop_optional = [
+        c for c in ["afname_betekenis", "opwek_betekenis"] if c in df.columns
+    ]
     if drop_optional:
         df.drop(columns=drop_optional, inplace=True)
 
@@ -276,7 +389,15 @@ def load_precomputed_h3_grouped(ttl=3600) -> pd.DataFrame | None:
             except Exception:
                 pass
 
-    for col in ["sum_mwh", "sum_area", "sum_kwh", "sum_vbos", "sum_lat", "sum_lon", "sum_bouwjaar"]:
+    for col in [
+        "sum_mwh",
+        "sum_area",
+        "sum_kwh",
+        "sum_vbos",
+        "sum_lat",
+        "sum_lon",
+        "sum_bouwjaar",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("float32")
     if "cnt" in df.columns:

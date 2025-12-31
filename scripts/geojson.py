@@ -1,8 +1,10 @@
-# %%  
+# %%
 import geopandas as gpd
 
 # 1. Laad GeoJSON
-gdf = gpd.read_file("/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/warmtenet_full.geojson")
+gdf = gpd.read_file(
+    "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/warmtenet_full.geojson"
+)
 
 # 2. Zet CRS als het niet in het bestand staat
 gdf = gdf.set_crs("EPSG:28992")

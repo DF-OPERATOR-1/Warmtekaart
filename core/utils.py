@@ -1,13 +1,11 @@
 # core/utils.py
 from __future__ import annotations
 
-import hashlib
 from functools import lru_cache
-from typing import List, Dict, Any, Callable
+from typing import List, Callable
 import math
 import statistics
 
-import pandas as pd
 import streamlit as st
 
 from core.config import BASE_H3_RES, AVG_HA_BY_RES
@@ -16,11 +14,13 @@ from core.config import BASE_H3_RES, AVG_HA_BY_RES
 # Kleuren & legenda
 # ============================================================
 
+
 def _lazy_matplotlib():
     """
     Laadt matplotlib pas wanneer we het écht nodig hebben (scheelt init-RAM/starttijd).
     """
     import importlib
+
     mpl = importlib.import_module("matplotlib")
     return mpl
 
@@ -61,7 +61,12 @@ def get_layer_colors(layer_cfg: dict):
 
 def legend_labels_from_breaks(breaks):
     pct = [int(b * 100) for b in breaks]
-    return [f"< {pct[0]}%", f"{pct[0]}–{pct[1]}%", f"{pct[1]}–{pct[2]}%", f"≥ {pct[2]}%"]
+    return [
+        f"< {pct[0]}%",
+        f"{pct[0]}–{pct[1]}%",
+        f"{pct[1]}–{pct[2]}%",
+        f"≥ {pct[2]}%",
+    ]
 
 
 def format_numeric_range_labels(breaks, suffix="", decimals: int = 0):
@@ -80,7 +85,9 @@ def format_numeric_range_labels(breaks, suffix="", decimals: int = 0):
     return labels
 
 
-def render_mini_legend(title, colors, labels, *, dark_mode: bool = False, footer_html: str | None = None):
+def render_mini_legend(
+    title, colors, labels, *, dark_mode: bool = False, footer_html: str | None = None
+):
     row_htmls = []
     for color, label in zip(colors, labels):
         if color is None:
@@ -162,7 +169,9 @@ def compute_quantile_breaks(values: list[float], n_bins: int = 5) -> list[float]
     return quants
 
 
-def _color_from_breaks(value: float | None, breaks: list[float], colors: list[List[int]]):
+def _color_from_breaks(
+    value: float | None, breaks: list[float], colors: list[List[int]]
+):
     if value is None or not math.isfinite(value):
         return [220, 220, 220, 80]
     for threshold, color in zip(breaks, colors[:-1]):
@@ -182,7 +191,11 @@ def colorize_numeric_geojson(
     extra_rows_fn: Callable[[dict], str] | None = None,
     location_row_display: str = "block",
 ):
-    if not gjson or not isinstance(gjson, dict) or gjson.get("type") != "FeatureCollection":
+    if (
+        not gjson
+        or not isinstance(gjson, dict)
+        or gjson.get("type") != "FeatureCollection"
+    ):
         return gjson
 
     feats_new = []
@@ -216,9 +229,11 @@ def colorize_numeric_geojson(
 
     return {"type": "FeatureCollection", "features": feats_new}
 
+
 # ============================================================
 # Nummerformatting & parsing
 # ============================================================
+
 
 def format_dutch_number(num, decimals=2):
     """
@@ -227,7 +242,9 @@ def format_dutch_number(num, decimals=2):
     if isinstance(num, int):
         return f"{num:,}".replace(",", ".")
     try:
-        return f"{num:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return (
+            f"{num:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        )
     except Exception:
         return ""
 
@@ -242,6 +259,7 @@ def parse_dutch_int(text: str, fallback: int = 0) -> int:
 # ============================================================
 # Zoom/line helpers
 # ============================================================
+
 
 def get_dynamic_resolution(zoom_level):
     """
@@ -274,16 +292,16 @@ def get_hexagon_metrics(zoom_level: int) -> dict[str, float]:
     except Exception:
         zoom = BASE_H3_RES
     res = min(max(0, zoom), BASE_H3_RES)
- 
+
     area_ha = float(AVG_HA_BY_RES.get(res, AVG_HA_BY_RES[BASE_H3_RES]))
     area_km2 = area_ha / 100.0
- 
+
     # Regelmatige hexagon met zijde s:
     # A = (3 * sqrt(3) / 2) * s^2
     side_km = math.sqrt((2.0 * area_km2) / (3.0 * math.sqrt(3.0)))
     flat_to_flat_km = math.sqrt(3.0) * side_km
     vertex_to_vertex_km = 2.0 * side_km
- 
+
     return {
         "resolution": float(res),
         "flat_width_km": float(flat_to_flat_km),
@@ -305,21 +323,22 @@ def get_hexagon_size(zoom_level: int) -> float:
 # ============================================================
 
 colorbrewer_colors = [
-    [69, 117, 180, 150],   # <10 Donkerblauw
+    [69, 117, 180, 150],  # <10 Donkerblauw
     [254, 224, 144, 150],  # 10-50 Lichtoranje
-    [215, 48, 39, 150]     # >=50 Rood
+    [215, 48, 39, 150],  # >=50 Rood
 ]
 
 # MWh/ha klassen (warmtevraagdichtheid) – 6 klassen, start bij ~25–100
 MWH_HA_BREAKS = [100, 500, 1000, 2000, 5000]
 MWH_HA_COLORS = [
     [170, 205, 240, 235],  # ~25-100 lichtblauw
-    [90, 140, 200, 235],   # 100-500 blauw
+    [90, 140, 200, 235],  # 100-500 blauw
     [245, 205, 140, 235],  # 500-1000 geel/oranje licht
-    [240, 170, 90, 235],   # 1000-2000 oranje
-    [210, 100, 60, 235],   # 2000-5000 rood-oranje
-    [130, 50, 55, 235],    # >5000 donkerrood
+    [240, 170, 90, 235],  # 1000-2000 oranje
+    [210, 100, 60, 235],  # 2000-5000 rood-oranje
+    [130, 50, 55, 235],  # >5000 donkerrood
 ]
+
 
 def get_color(value):
     """
@@ -355,6 +374,7 @@ def get_heat_color(value, unit: str):
 # View helper voor selectie
 # ============================================================
 
+
 def _view_for_selection(df_full, woonplaatsen_geselecteerd):
     """
     Bepaalt latitude, longitude en zoom:
@@ -363,7 +383,7 @@ def _view_for_selection(df_full, woonplaatsen_geselecteerd):
     - Meerdere woonplaatsen => center + zoom op de begrenzende box van de selectie
     """
     FRIESLAND_CENTER = (53.125, 5.75)
-    FRIESLAND_ZOOM   = 8
+    FRIESLAND_ZOOM = 8
     MIN_ZOOM, MAX_ZOOM = 8, 13.0
 
     if not woonplaatsen_geselecteerd:
@@ -380,17 +400,25 @@ def _view_for_selection(df_full, woonplaatsen_geselecteerd):
         return lat_center, lon_center, 13.0
 
     lat_min, lat_max = float(df_sel["latitude"].min()), float(df_sel["latitude"].max())
-    lon_min, lon_max = float(df_sel["longitude"].min()), float(df_sel["longitude"].max())
+    lon_min, lon_max = float(df_sel["longitude"].min()), float(
+        df_sel["longitude"].max()
+    )
     lat_span = max(0.0001, lat_max - lat_min)
     lon_span = max(0.0001, lon_max - lon_min)
     span = max(lat_span, lon_span)
 
-    if   span > 2.0:  zoom = 8.0
-    elif span > 1.0:  zoom = 8.0
-    elif span > 0.5:  zoom = 9.0
-    elif span > 0.25: zoom = 9.0
-    elif span > 0.12: zoom = 10.0
-    else:             zoom = 11.0
+    if span > 2.0:
+        zoom = 8.0
+    elif span > 1.0:
+        zoom = 8.0
+    elif span > 0.5:
+        zoom = 9.0
+    elif span > 0.25:
+        zoom = 9.0
+    elif span > 0.12:
+        zoom = 10.0
+    else:
+        zoom = 11.0
 
     zoom = max(MIN_ZOOM, min(MAX_ZOOM, zoom))
     return lat_center, lon_center, zoom
@@ -399,6 +427,7 @@ def _view_for_selection(df_full, woonplaatsen_geselecteerd):
 # ============================================================
 # Procenthelpers + GeoJSON kleuring
 # ============================================================
+
 
 def _coerce_frac(v):
     """Accepteert 0–1 float, '0.15', '15', '15%', '15,2' etc. Geeft fractie 0–1 of None."""
@@ -429,7 +458,14 @@ def pct_color_from_breaks(v, breaks, colors):
 
 
 @st.cache_data(show_spinner=False, max_entries=24)
-def colorize_geojson_cached(gjson: dict, prop_name: str, out_prop: str, breaks: list, colors: list, layer_label: str = ""):
+def colorize_geojson_cached(
+    gjson: dict,
+    prop_name: str,
+    out_prop: str,
+    breaks: list,
+    colors: list,
+    layer_label: str = "",
+):
     """
     Schrijft per feature een RGBA in properties[out_prop] -> properties[prop_name].
     Cached, zodat de kleurtoewijzing niet steeds opnieuw doorlopen wordt.
@@ -438,7 +474,11 @@ def colorize_geojson_cached(gjson: dict, prop_name: str, out_prop: str, breaks: 
     - Geen deepcopy van geometrieën.
     - Behoud minimale keys voor tooltip (buurt/gemeente + label + pct).
     """
-    if not gjson or not isinstance(gjson, dict) or gjson.get("type") != "FeatureCollection":
+    if (
+        not gjson
+        or not isinstance(gjson, dict)
+        or gjson.get("type") != "FeatureCollection"
+    ):
         return gjson
 
     feats_new = []
@@ -452,7 +492,7 @@ def colorize_geojson_cached(gjson: dict, prop_name: str, out_prop: str, breaks: 
         v_frac = _coerce_frac(v)
         pct_value = int(round(v_frac * 100, 0)) if v_frac is not None else ""
         props["_value_pct_fmt"] = pct_value
-        props["_value_display"] = ("" if pct_value == "" else f"{pct_value}%")
+        props["_value_display"] = "" if pct_value == "" else f"{pct_value}%"
         props["_layer_label"] = layer_label if layer_label else ""
         # --- Zorg dat buurt/gemeente altijd bestaan voor tooltip
         props["buurtnaam"] = props.get("buurtnaam", "")
@@ -461,8 +501,8 @@ def colorize_geojson_cached(gjson: dict, prop_name: str, out_prop: str, breaks: 
         props["gemeente_row_display"] = props.get("gemeente_row_display", "block")
         props["buurt_row_display"] = props.get("buurt_row_display", "block")
         # --- Display-secties
-        props["geo_section_display"]  = "block"
-        props["hex_section_display"]  = "none"
+        props["geo_section_display"] = "block"
+        props["hex_section_display"] = "none"
         props["site_section_display"] = "none"
 
         geom = feat.get("geometry")  # geen diepe kopie
@@ -474,6 +514,7 @@ def colorize_geojson_cached(gjson: dict, prop_name: str, out_prop: str, breaks: 
 # ============================================================
 # Kleine utils die elders gebruikt worden
 # ============================================================
+
 
 def text_input_int(label: str, key: str, default: int) -> int:
     """

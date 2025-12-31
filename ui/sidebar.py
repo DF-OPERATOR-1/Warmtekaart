@@ -11,19 +11,19 @@ import pandas as pd
 import streamlit as st
 
 from core.config import LAYER_CFG, BASEMAP_CFG
+from core.io import resolve_wegennet_path, geojson_unique_props
 from core.utils import (
     format_dutch_number,
     get_dynamic_resolution,
-    get_hexagon_metrics,
     get_layer_colors,
     legend_labels_from_breaks,
     render_mini_legend,
     text_input_int,
     parse_dutch_int,
-    format_numeric_range_labels,
     MWH_HA_BREAKS,
     MWH_HA_COLORS,
 )
+
 
 # ---------------------------
 # Dark mode (helper)
@@ -47,8 +47,8 @@ def _is_dark_mode() -> bool:
     if isinstance(map_style, str) and "dark" in map_style.lower():
         return True
     return False
- 
- 
+
+
 def _legend_theme_colors(dark_mode: bool) -> dict[str, str]:
     if dark_mode:
         return {
@@ -78,7 +78,9 @@ def _warmtenet_legend_items(
     label_meta = meta.get("labels") or {}
     allowed = {str(k).strip() for k in allowed_keys} if allowed_keys else None
     type_by_key = meta.get("type_by_key") or {}
-    type_filter = {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    type_filter = (
+        {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    )
     wp_filter = {str(w).strip().lower() for w in woonplaatsen} if woonplaatsen else None
     items: list[tuple[list[int], str, str]] = []
     for key in sorted(label_meta.keys()):
@@ -98,16 +100,20 @@ def _warmtenet_legend_items(
             items.append((color, label, key))
     return items
 
+
 # ---------------------------
 # Kleine helpers (RAM-zuinig)
 # ---------------------------
-def _fillna_categorical(df_in: pd.DataFrame, col: str, value: str = "Onbekend") -> pd.DataFrame:
+def _fillna_categorical(
+    df_in: pd.DataFrame, col: str, value: str = "Onbekend"
+) -> pd.DataFrame:
     """Veilige NA -> 'Onbekend' voor categoricals zonder onnodige kopieën."""
     if col not in df_in.columns:
         return df_in
     s = df_in[col]
     try:
         from pandas.api.types import CategoricalDtype
+
         is_cat = isinstance(s.dtype, CategoricalDtype)
     except Exception:
         is_cat = False
@@ -133,7 +139,9 @@ def _rgba_to_css(color: list[int]) -> str:
         return "rgba(220,220,220,0.6)"
 
 
-def _render_big_legend(current_threshold_display: float, heat_unit: str, *, dark_mode: bool):
+def _render_big_legend(
+    current_threshold_display: float, heat_unit: str, *, dark_mode: bool
+):
     """Render de hoofdlegenda voor de warmtevraaglaag."""
     colors = _legend_theme_colors(dark_mode)
     bg = colors["bg"]
@@ -154,18 +162,27 @@ def _render_big_legend(current_threshold_display: float, heat_unit: str, *, dark
             f"{fmt(MWH_HA_BREAKS[3])} – {fmt(MWH_HA_BREAKS[4])} MWh/ha",
             f"> {fmt(MWH_HA_BREAKS[4])} MWh/ha",
         ]
-        legend_rows = [(_rgba_to_css(color), label) for color, label in zip(MWH_HA_COLORS, labels)]
+        legend_rows = [
+            (_rgba_to_css(color), label) for color, label in zip(MWH_HA_COLORS, labels)
+        ]
         pot_label_value = current_threshold_display
-        pot_label = f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
+        pot_label = (
+            f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
+        )
         title = "Warmtevraag (MWh/ha)"
     else:
         legend_rows = [
             ("#4575b4", "< 10,0 kWh/m²"),
             ("#fee090", "10,0 - 50,0 kWh/m²"),
-            ("#d73027", f"50,0 - {format_dutch_number(current_threshold_display, 0)} kWh/m²"),
+            (
+                "#d73027",
+                f"50,0 - {format_dutch_number(current_threshold_display, 0)} kWh/m²",
+            ),
         ]
         pot_label_value = current_threshold_display
-        pot_label = f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
+        pot_label = (
+            f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
+        )
         title = "Warmtevraag (kWh/m²)"
 
     legend_html_rows = "".join(
@@ -234,8 +251,13 @@ def build_sidebar(
     """
     # defaults + migratie van bestaande grenswaarde
     st.session_state.setdefault("heat_unit", "MWh/ha")
-    if "grenswaarde_input" in st.session_state and "grenswaarde_input_kwh" not in st.session_state:
-        st.session_state["grenswaarde_input_kwh"] = st.session_state.get("grenswaarde_input", 100)
+    if (
+        "grenswaarde_input" in st.session_state
+        and "grenswaarde_input_kwh" not in st.session_state
+    ):
+        st.session_state["grenswaarde_input_kwh"] = st.session_state.get(
+            "grenswaarde_input", 100
+        )
     st.session_state.setdefault("grenswaarde_input", 100)  # backward compat
     st.session_state.setdefault("grenswaarde_input_mwhha", 5500)
     st.session_state.setdefault("participatie", 80)
@@ -243,6 +265,7 @@ def build_sidebar(
     st.session_state.setdefault("BASEMAP_CFG", BASEMAP_CFG)
 
     ui: Dict[str, Any] = {}
+    opacity_help = "0 = transparant (onderliggende lagen zichtbaar) | 1 = dekkend"
 
     with st.sidebar:
         dark_mode = _is_dark_mode()
@@ -250,7 +273,9 @@ def build_sidebar(
 
         # ---------------- Kaart ----------------
         with st.expander("Kaart", expanded=True):
-            ui["zoom_level"] = st.slider("Selecteer zoomniveau", min_value=9, max_value=13, value=10)
+            ui["zoom_level"] = st.slider(
+                "Selecteer zoomniveau", min_value=9, max_value=13, value=10
+            )
             ui["resolution"] = get_dynamic_resolution(ui["zoom_level"])
             zoom_copy = ui["zoom_level"]
             zoom_to_width_km = {
@@ -267,10 +292,11 @@ def build_sidebar(
                     f"<b>{approx_width_km} km</b> breed."
                 )
             else:
-                headline = (
-                    f"Bij <b>zoomniveau {zoom_copy}</b> zoom je verder in; gebruik scroll/pinch voor extra detail."
-                )
-            st.markdown(f"<span style='font-size: 12px;'>{headline}</span>", unsafe_allow_html=True)
+                headline = f"Bij <b>zoomniveau {zoom_copy}</b> zoom je verder in; gebruik scroll/pinch voor extra detail."
+            st.markdown(
+                f"<span style='font-size: 12px;'>{headline}</span>",
+                unsafe_allow_html=True,
+            )
             with st.expander("Uitleg over zoomniveau"):
                 st.write(
                     "Het zoomniveau bepaalt hoeveel detail de kaart toont:\n"
@@ -284,7 +310,7 @@ def build_sidebar(
             brt_enabled = st.toggle(
                 "Toon BRT Achtergrondkaart",
                 value=bool(brt_default),
-                help="Gebruik de BRT Achtergrondkaart als achtergrondlaag."
+                help="Gebruik de BRT Achtergrondkaart als achtergrondlaag.",
             )
             ui["use_brt_basemap"] = brt_enabled
             st.session_state["use_brt_basemap"] = brt_enabled
@@ -295,7 +321,11 @@ def build_sidebar(
                 style_desc = BASEMAP_CFG.get("brt", {}).get("legend_html")
                 if style_desc:
                     st.caption(style_desc)
-            map_style_value = BASEMAP_CFG.get("brt", {}).get("map_style") if brt_enabled else map_theme
+            map_style_value = (
+                BASEMAP_CFG.get("brt", {}).get("map_style")
+                if brt_enabled
+                else map_theme
+            )
             ui["map_style"] = map_style_value
             st.session_state["map_style"] = map_style_value
             ui["basemap_style"] = basemap_style
@@ -304,7 +334,9 @@ def build_sidebar(
         # ---------------- Lagen ----------------
         with st.expander("Lagen", expanded=True):
             st.subheader("Warmtevraaglaag")
-            ui["show_main_layer"] = st.toggle("Gasverbruik", value=True, key="show_main_layer")
+            ui["show_main_layer"] = st.toggle(
+                "Gasverbruik", value=True, key="show_main_layer"
+            )
 
             heat_unit_options = ["MWh/ha", "kWh/m²"]
             heat_unit_labels = {
@@ -328,7 +360,9 @@ def build_sidebar(
 
             if heat_unit == "MWh/ha":
                 min_threshold_display = 5001
-                default_mwhha = int(float(st.session_state.get("grenswaarde_input_mwhha", 5500)))
+                default_mwhha = int(
+                    float(st.session_state.get("grenswaarde_input_mwhha", 5500))
+                )
                 input_key = "grenswaarde_input_mwhha_str"
                 raw_val = st.session_state.get(input_key)
                 if raw_val is None:
@@ -344,13 +378,17 @@ def build_sidebar(
                     "Stel de minimale grenswaarde (threshold) in per MWh/ha:",
                     key=input_key,
                 )
-                threshold_display_raw = parse_dutch_int(threshold_str or "", fallback=default_mwhha)
+                threshold_display_raw = parse_dutch_int(
+                    threshold_str or "", fallback=default_mwhha
+                )
                 threshold_display = max(threshold_display_raw, min_threshold_display)
                 st.session_state["grenswaarde_input_mwhha"] = threshold_display
                 threshold_kwh = float(threshold_display) / 10.0
             else:
                 min_threshold_display = 50
-                default_kwh = int(float(st.session_state.get("grenswaarde_input_kwh", 100)))
+                default_kwh = int(
+                    float(st.session_state.get("grenswaarde_input_kwh", 100))
+                )
                 input_key = "grenswaarde_input_kwh_str"
                 raw_val = st.session_state.get(input_key)
                 if raw_val is None:
@@ -366,7 +404,9 @@ def build_sidebar(
                     "Stel de minimale grenswaarde (threshold) in per kWh/m²:",
                     key=input_key,
                 )
-                threshold_display_raw = parse_dutch_int(threshold_str or "", fallback=default_kwh)
+                threshold_display_raw = parse_dutch_int(
+                    threshold_str or "", fallback=default_kwh
+                )
                 threshold_display = max(threshold_display_raw, min_threshold_display)
                 st.session_state["grenswaarde_input_kwh"] = threshold_display
                 threshold_kwh = float(threshold_display)
@@ -376,7 +416,9 @@ def build_sidebar(
 
             _render_big_legend(threshold_display, heat_unit, dark_mode=dark_mode)
 
-            ui["show_indicative_layer"] = st.toggle("Aandachtsgebieden tonen", value=True, key="show_indicative_layer")
+            ui["show_indicative_layer"] = st.toggle(
+                "Aandachtsgebieden tonen", value=True, key="show_indicative_layer"
+            )
             ui["warmte_hex_opacity"] = st.slider(
                 "Transparantie warmtevraag-hexagonen",
                 min_value=0.0,
@@ -384,7 +426,7 @@ def build_sidebar(
                 value=st.session_state.get("warmte_hex_opacity", 0.6),
                 step=0.05,
                 key="warmte_hex_opacity",
-                help="0 = transparant (onderliggende lagen zichtbaar) | 1 = dekkend"
+                help=opacity_help,
             )
             with st.expander("Wat doet de grenswaarde?"):
                 st.write(
@@ -392,10 +434,12 @@ def build_sidebar(
                     "De legenda en kaartkleuren passen mee met de gekozen eenheid. "
                     "De grenswaarde wordt toegepast in dezelfde eenheid en wordt ook gebruikt voor de aandachtsgebieden."
                 )
-            
+
             # Model
             st.subheader("Potentiële warmtenetten")
-            default_warmtenet_opacity = (warmtenet_meta or {}).get("default_opacity", 0.85)
+            default_warmtenet_opacity = (warmtenet_meta or {}).get(
+                "default_opacity", 0.85
+            )
             default_wegennet_opacity = (wegennet_meta or {}).get("default_opacity", 0.8)
             show_warmtenet = st.toggle(
                 "Warmtenetten",
@@ -410,9 +454,15 @@ def build_sidebar(
             ui["show_warmtenet_model"] = show_warmtenet
             ui["show_wegennet"] = show_wegennet
             if show_warmtenet:
-                default_show_sources = bool(st.session_state.get("warmtenet_show_sources", True))
-                default_show_objects = bool(st.session_state.get("warmtenet_show_objects", True))
-                default_show_lines = bool(st.session_state.get("warmtenet_show_lines", True))
+                default_show_sources = bool(
+                    st.session_state.get("warmtenet_show_sources", True)
+                )
+                default_show_objects = bool(
+                    st.session_state.get("warmtenet_show_objects", True)
+                )
+                default_show_lines = bool(
+                    st.session_state.get("warmtenet_show_lines", True)
+                )
                 st.markdown("**Onderdelen warmtenetlaag**")
                 show_sources = st.checkbox(
                     "Bronnen",
@@ -433,16 +483,33 @@ def build_sidebar(
                 ui["warmtenet_show_objects"] = show_objects
                 ui["warmtenet_show_lines"] = show_lines
 
-                model_wp_options = warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
+                model_wp_options = (
+                    warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
+                )
                 if "gemeentenaam" in df_in.columns:
                     selected_gemeenten = st.session_state.get("gemeente_selectie", [])
                     if selected_gemeenten:
-                        mask = df_in["gemeentenaam"].astype(str).isin(selected_gemeenten)
-                        allowed_wp = {str(w) for w in df_in.loc[mask, "woonplaats"].dropna().unique()}
+                        mask = (
+                            df_in["gemeentenaam"].astype(str).isin(selected_gemeenten)
+                        )
+                        allowed_wp = {
+                            str(w)
+                            for w in df_in.loc[mask, "woonplaats"].dropna().unique()
+                        }
                         if allowed_wp:
-                            model_wp_options = [w for w in model_wp_options if w in allowed_wp]
-                prev_model_wp = [w for w in st.session_state.get("warmtenet_wp_selectie", []) if w in model_wp_options]
-                base_default = [w for w in st.session_state.get("woonplaats_selectie", []) if w in model_wp_options]
+                            model_wp_options = [
+                                w for w in model_wp_options if w in allowed_wp
+                            ]
+                prev_model_wp = [
+                    w
+                    for w in st.session_state.get("warmtenet_wp_selectie", [])
+                    if w in model_wp_options
+                ]
+                base_default = [
+                    w
+                    for w in st.session_state.get("woonplaats_selectie", [])
+                    if w in model_wp_options
+                ]
                 default_model_wp = prev_model_wp or base_default or model_wp_options
                 model_wp_selectie = st.multiselect(
                     "Filter op woonplaats",
@@ -453,7 +520,11 @@ def build_sidebar(
                 ui["warmtenet_wp_selectie"] = model_wp_selectie
 
                 type_opts = warmtenet_meta.get("types", []) if warmtenet_meta else []
-                prev_type_sel = [t for t in st.session_state.get("warmtenet_type_selectie", []) if t in type_opts]
+                prev_type_sel = [
+                    t
+                    for t in st.session_state.get("warmtenet_type_selectie", [])
+                    if t in type_opts
+                ]
                 default_type_sel = prev_type_sel or type_opts
                 type_selectie = st.multiselect(
                     "Filter op type bron:",
@@ -469,10 +540,17 @@ def build_sidebar(
                     None,
                     type_selectie,
                 )
-                filter_sig = (tuple(sorted(model_wp_selectie)), tuple(sorted(type_selectie)))
+                filter_sig = (
+                    tuple(sorted(model_wp_selectie)),
+                    tuple(sorted(type_selectie)),
+                )
                 available_keys = [k for *_, k in legend_items_all]
                 # default: bewaar vorige selectie, anders alles
-                prev_sel = [k for k in st.session_state.get("warmtenet_selected_keys", []) if k in available_keys]
+                prev_sel = [
+                    k
+                    for k in st.session_state.get("warmtenet_selected_keys", [])
+                    if k in available_keys
+                ]
                 if st.session_state.get("_warmtenet_last_filter") != filter_sig:
                     prev_sel = available_keys
                 if not prev_sel:
@@ -481,7 +559,9 @@ def build_sidebar(
                 selected_keys = st.multiselect(
                     "Kies bronnen om te tonen:",
                     options=available_keys,
-                    format_func=lambda k: next((lbl for _, lbl, key in legend_items_all if key == k), k),
+                    format_func=lambda k: next(
+                        (lbl for _, lbl, key in legend_items_all if key == k), k
+                    ),
                     default=prev_sel,
                 )
                 ui["warmtenet_selected_keys"] = selected_keys
@@ -490,9 +570,14 @@ def build_sidebar(
                     "Transparantie warmtebron laag",
                     min_value=0.1,
                     max_value=1.0,
-                    value=float(st.session_state.get("warmtenet_opacity", default_warmtenet_opacity)),
+                    value=float(
+                        st.session_state.get(
+                            "warmtenet_opacity", default_warmtenet_opacity
+                        )
+                    ),
                     step=0.05,
                     key="warmtenet_opacity",
+                    help=opacity_help,
                 )
                 legend_items = _warmtenet_legend_items(
                     warmtenet_meta,
@@ -515,11 +600,17 @@ def build_sidebar(
                         grouped_labels.append(label)
                     legend_parts = []
                     if ui.get("warmtenet_show_sources", True):
-                        legend_parts.append("<span style='color:#111;'>&#9679;</span> bron")
+                        legend_parts.append(
+                            "<span style='color:#111;'>&#9679;</span> bron"
+                        )
                     if ui.get("warmtenet_show_objects", True):
-                        legend_parts.append("<span style='color:#111;'>&#9675;</span> object")
+                        legend_parts.append(
+                            "<span style='color:#111;'>&#9675;</span> object"
+                        )
                     if ui.get("warmtenet_show_lines", True):
-                        legend_parts.append("<span style='color:#444;'>───</span> leiding")
+                        legend_parts.append(
+                            "<span style='color:#444;'>───</span> leiding"
+                        )
                     header_html = "<br>".join(legend_parts)
                     legend_title = LAYER_CFG["warmtenet_model"]["legend_title"]
                     if header_html:
@@ -534,82 +625,172 @@ def build_sidebar(
                 else:
                     st.info("Geen warmtebronnen voor de huidige selectie.")
             else:
-                ui["warmtenet_opacity"] = st.session_state.setdefault("warmtenet_opacity", default_warmtenet_opacity)
-                ui["warmtenet_selected_keys"] = st.session_state.setdefault("warmtenet_selected_keys", [])
-                ui["warmtenet_show_sources"] = st.session_state.setdefault("warmtenet_show_sources", True)
-                ui["warmtenet_show_objects"] = st.session_state.setdefault("warmtenet_show_objects", True)
-                ui["warmtenet_show_lines"] = st.session_state.setdefault("warmtenet_show_lines", True)
+                ui["warmtenet_opacity"] = st.session_state.setdefault(
+                    "warmtenet_opacity", default_warmtenet_opacity
+                )
+                ui["warmtenet_selected_keys"] = st.session_state.setdefault(
+                    "warmtenet_selected_keys", []
+                )
+                ui["warmtenet_show_sources"] = st.session_state.setdefault(
+                    "warmtenet_show_sources", True
+                )
+                ui["warmtenet_show_objects"] = st.session_state.setdefault(
+                    "warmtenet_show_objects", True
+                )
+                ui["warmtenet_show_lines"] = st.session_state.setdefault(
+                    "warmtenet_show_lines", True
+                )
 
             if show_wegennet:
                 zoom_level = int(ui.get("zoom_level", 0))
                 min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
                 st.markdown("**Onderdelen wegennetlaag**")
                 if zoom_level < min_zoom:
-                    st.info(f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}.")
+                    st.info(
+                        f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}."
+                    )
                 else:
-                    wp_options = wegennet_meta.get("woonplaatsen", []) if wegennet_meta else []
-                    geselecteerde_gemeenten = st.session_state.get("gemeente_selectie", [])
+                    geselecteerde_gemeenten = st.session_state.get(
+                        "gemeente_selectie", []
+                    )
+                    no_data_warning = True
                     if geselecteerde_gemeenten and len(geselecteerde_gemeenten) != 1:
-                        st.warning("Wegennet wordt alleen getoond bij één gemeente. Ga naar Filters en kies één gemeente om deze laag te zien.")
+                        st.warning(
+                            "Wegennet wordt alleen getoond bij één gemeente. Ga naar Filters en kies één gemeente om deze laag te zien."
+                        )
                         wp_options = []
-                    if "gemeentenaam" in df_in.columns and len(geselecteerde_gemeenten) == 1:
-                        mask = df_in["gemeentenaam"].astype(str).isin(geselecteerde_gemeenten)
-                        allowed_wp = sorted({str(w) for w in df_in.loc[mask, "woonplaats"].dropna().unique()})
+                        no_data_warning = False
+                    else:
+                        gemeente_naam = (
+                            geselecteerde_gemeenten[0]
+                            if geselecteerde_gemeenten
+                            else ""
+                        )
+                        wegennet_path = resolve_wegennet_path(gemeente_naam)
+                        wp_options = geojson_unique_props(wegennet_path, "area_name")
+                    if (
+                        "gemeentenaam" in df_in.columns
+                        and len(geselecteerde_gemeenten) == 1
+                        and wp_options
+                    ):
+                        mask = (
+                            df_in["gemeentenaam"]
+                            .astype(str)
+                            .isin(geselecteerde_gemeenten)
+                        )
+                        allowed_wp = {
+                            str(w)
+                            for w in df_in.loc[mask, "woonplaats"].dropna().unique()
+                        }
                         if allowed_wp:
                             wp_options = [w for w in wp_options if w in allowed_wp]
-                    prev_wp = [w for w in st.session_state.get("wegennet_wp_selectie", []) if w in wp_options]
-                    base_default = [w for w in st.session_state.get("woonplaats_selectie", []) if w in wp_options]
-                    default_wp = prev_wp or base_default or wp_options
-                    wp_selectie = st.multiselect(
-                        "Filter op woonplaats",
-                        options=wp_options,
-                        default=default_wp,
-                    )
-                    st.session_state["wegennet_wp_selectie"] = wp_selectie
-                    ui["wegennet_wp_selectie"] = wp_selectie
 
-                    type_opts = wegennet_meta.get("types", []) if wegennet_meta else []
-                    prev_type_sel = [t for t in st.session_state.get("wegennet_type_selectie", []) if t in type_opts]
-                    default_type_sel = prev_type_sel or type_opts
-                    type_labels = (wegennet_meta or {}).get("type_labels", {})
-                    type_label_map = {str(k).lower(): v for k, v in type_labels.items()}
-                    type_selectie = st.multiselect(
-                        "Filter op type:",
-                        options=type_opts,
-                        default=default_type_sel,
-                        format_func=lambda v: type_label_map.get(str(v).lower(), v),
-                    )
-                    st.session_state["wegennet_type_selectie"] = type_selectie
-                    ui["wegennet_type_selectie"] = type_selectie
-
-                    ui["wegennet_opacity"] = st.slider(
-                        "Transparantie wegennet",
-                        min_value=0.1,
-                        max_value=1.0,
-                        value=float(st.session_state.get("wegennet_opacity", default_wegennet_opacity)),
-                        step=0.05,
-                        key="wegennet_opacity",
-                    )
-
-                    cfg_wegennet = LAYER_CFG.get("wegennet", {})
-                    type_colors = cfg_wegennet.get("type_colors", {})
-                    if type_colors and type_opts:
-                        legend_colors = [
-                            type_colors.get(t, cfg_wegennet.get("default_color", [120, 120, 120, 200]))
-                            for t in type_opts
-                        ]
-                        legend_labels = [type_label_map.get(str(t).lower(), t) for t in type_opts]
-                        render_mini_legend(
-                            cfg_wegennet.get("legend_title", "Wegennet"),
-                            legend_colors,
-                            legend_labels,
-                            dark_mode=dark_mode,
-                            footer_html="",
+                    if not wp_options:
+                        if no_data_warning:
+                            st.warning("Geen wegennetdata gevonden voor deze gemeente.")
+                        st.session_state["wegennet_wp_selectie"] = []
+                        ui["wegennet_wp_selectie"] = []
+                        st.session_state.setdefault("wegennet_type_selectie", [])
+                        ui["wegennet_type_selectie"] = st.session_state.get(
+                            "wegennet_type_selectie", []
                         )
+                        ui["wegennet_opacity"] = st.session_state.setdefault(
+                            "wegennet_opacity", default_wegennet_opacity
+                        )
+                    else:
+                        prev_wp = [
+                            w
+                            for w in st.session_state.get("wegennet_wp_selectie", [])
+                            if w in wp_options
+                        ]
+                        base_default = [
+                            w
+                            for w in st.session_state.get("woonplaats_selectie", [])
+                            if w in wp_options
+                        ]
+                        default_wp = prev_wp or base_default or wp_options
+                        wp_selectie = st.multiselect(
+                            "Filter op woonplaats",
+                            options=wp_options,
+                            default=default_wp,
+                        )
+                        st.session_state["wegennet_wp_selectie"] = wp_selectie
+                        ui["wegennet_wp_selectie"] = wp_selectie
+
+                        type_opts = (
+                            wegennet_meta.get("types", []) if wegennet_meta else []
+                        )
+                        if not type_opts:
+                            cfg_types = (
+                                LAYER_CFG.get("wegennet", {}).get("type_labels", {})
+                                or {}
+                            ).keys()
+                            type_opts = sorted({str(t).lower() for t in cfg_types})
+                        prev_type_sel = [
+                            t
+                            for t in st.session_state.get("wegennet_type_selectie", [])
+                            if t in type_opts
+                        ]
+                        default_type_sel = prev_type_sel or type_opts
+                        type_labels = (wegennet_meta or {}).get("type_labels", {})
+                        type_label_map = {
+                            str(k).lower(): v for k, v in type_labels.items()
+                        }
+                        type_selectie = st.multiselect(
+                            "Filter op type:",
+                            options=type_opts,
+                            default=default_type_sel,
+                            format_func=lambda v: type_label_map.get(str(v).lower(), v),
+                        )
+                        st.session_state["wegennet_type_selectie"] = type_selectie
+                        ui["wegennet_type_selectie"] = type_selectie
+
+                        ui["wegennet_opacity"] = st.slider(
+                            "Transparantie wegennet",
+                            min_value=0.1,
+                            max_value=1.0,
+                            value=float(
+                                st.session_state.get(
+                                    "wegennet_opacity", default_wegennet_opacity
+                                )
+                            ),
+                            step=0.05,
+                            key="wegennet_opacity",
+                            help=opacity_help,
+                        )
+
+                        cfg_wegennet = LAYER_CFG.get("wegennet", {})
+                        type_colors = cfg_wegennet.get("type_colors", {})
+                        if type_colors and type_opts:
+                            legend_colors = [
+                                type_colors.get(
+                                    t,
+                                    cfg_wegennet.get(
+                                        "default_color", [120, 120, 120, 200]
+                                    ),
+                                )
+                                for t in type_opts
+                            ]
+                            legend_labels = [
+                                type_label_map.get(str(t).lower(), t) for t in type_opts
+                            ]
+                            render_mini_legend(
+                                cfg_wegennet.get("legend_title", "Wegennet"),
+                                legend_colors,
+                                legend_labels,
+                                dark_mode=dark_mode,
+                                footer_html="",
+                            )
             else:
-                ui["wegennet_opacity"] = st.session_state.setdefault("wegennet_opacity", default_wegennet_opacity)
-                ui["wegennet_wp_selectie"] = st.session_state.setdefault("wegennet_wp_selectie", [])
-                ui["wegennet_type_selectie"] = st.session_state.setdefault("wegennet_type_selectie", [])
+                ui["wegennet_opacity"] = st.session_state.setdefault(
+                    "wegennet_opacity", default_wegennet_opacity
+                )
+                ui["wegennet_wp_selectie"] = st.session_state.setdefault(
+                    "wegennet_wp_selectie", []
+                )
+                ui["wegennet_type_selectie"] = st.session_state.setdefault(
+                    "wegennet_type_selectie", []
+                )
 
             # Potentielagen
             st.subheader("Aquathermie potentielagen EXTRAQT")
@@ -631,15 +812,22 @@ def build_sidebar(
                 key=LAYER_CFG["water_potentie"]["toggle_key"],
             )
             ui["show_water_potentie"] = show_water_pot
-            default_water_opacity = pot_meta.get("water_potentie", {}).get("default_opacity", 0.7)
+            default_water_opacity = pot_meta.get("water_potentie", {}).get(
+                "default_opacity", 0.7
+            )
             if show_water_pot:
                 ui["water_potentie_opacity"] = st.slider(
                     "Transparantie waterpotentie",
                     min_value=0.1,
                     max_value=1.0,
-                    value=float(st.session_state.get("water_potentie_opacity", default_water_opacity)),
+                    value=float(
+                        st.session_state.get(
+                            "water_potentie_opacity", default_water_opacity
+                        )
+                    ),
                     step=0.05,
                     key="water_potentie_opacity",
+                    help=opacity_help,
                 )
                 meta = pot_meta.get("water_potentie")
                 if meta and meta.get("labels"):
@@ -651,7 +839,9 @@ def build_sidebar(
                         footer_html=_potentie_footer_html(),
                     )
             else:
-                ui["water_potentie_opacity"] = st.session_state.setdefault("water_potentie_opacity", default_water_opacity)
+                ui["water_potentie_opacity"] = st.session_state.setdefault(
+                    "water_potentie_opacity", default_water_opacity
+                )
 
             show_buurt_pot = st.toggle(
                 "Buurtpotentie uit aquathermie",
@@ -659,15 +849,22 @@ def build_sidebar(
                 key=LAYER_CFG["buurt_potentie"]["toggle_key"],
             )
             ui["show_buurt_potentie"] = show_buurt_pot
-            default_buurt_opacity = pot_meta.get("buurt_potentie", {}).get("default_opacity", 0.7)
+            default_buurt_opacity = pot_meta.get("buurt_potentie", {}).get(
+                "default_opacity", 0.7
+            )
             if show_buurt_pot:
                 ui["buurt_potentie_opacity"] = st.slider(
                     "Transparantie buurtpotentie uit aquathermie",
                     min_value=0.1,
                     max_value=1.0,
-                    value=float(st.session_state.get("buurt_potentie_opacity", default_buurt_opacity)),
+                    value=float(
+                        st.session_state.get(
+                            "buurt_potentie_opacity", default_buurt_opacity
+                        )
+                    ),
                     step=0.05,
                     key="buurt_potentie_opacity",
+                    help=opacity_help,
                 )
                 meta = pot_meta.get("buurt_potentie")
                 if meta and meta.get("labels"):
@@ -679,11 +876,17 @@ def build_sidebar(
                         footer_html=_potentie_footer_html(),
                     )
             else:
-                ui["buurt_potentie_opacity"] = st.session_state.setdefault("buurt_potentie_opacity", default_buurt_opacity)
+                ui["buurt_potentie_opacity"] = st.session_state.setdefault(
+                    "buurt_potentie_opacity", default_buurt_opacity
+                )
 
             # Woonlagen + mini-legenda's
             st.subheader("Woonlagen")
-            show_energiearmoede = st.toggle("Energiearmoede", value=False, key=LAYER_CFG["energiearmoede"]["toggle_key"])
+            show_energiearmoede = st.toggle(
+                "Energiearmoede",
+                value=False,
+                key=LAYER_CFG["energiearmoede"]["toggle_key"],
+            )
             if show_energiearmoede:
                 c = LAYER_CFG["energiearmoede"]
                 colors = get_layer_colors(c)
@@ -696,7 +899,9 @@ def build_sidebar(
                     footer_html="Bron: DataFryslân (2022)",
                 )
 
-            show_koopwoningen = st.toggle("Koopwoningen", value=False, key=LAYER_CFG["koopwoningen"]["toggle_key"])
+            show_koopwoningen = st.toggle(
+                "Koopwoningen", value=False, key=LAYER_CFG["koopwoningen"]["toggle_key"]
+            )
             if show_koopwoningen:
                 c = LAYER_CFG["koopwoningen"]
                 colors = get_layer_colors(c)
@@ -709,7 +914,11 @@ def build_sidebar(
                     footer_html="Bron: CBS (2023)",
                 )
 
-            show_corporatie = st.toggle("Wooncorporatie", value=False, key=LAYER_CFG["wooncorporatie"]["toggle_key"])
+            show_corporatie = st.toggle(
+                "Wooncorporatie",
+                value=False,
+                key=LAYER_CFG["wooncorporatie"]["toggle_key"],
+            )
             if show_corporatie:
                 c = LAYER_CFG["wooncorporatie"]
                 colors = get_layer_colors(c)
@@ -728,7 +937,8 @@ def build_sidebar(
                     min_value=0.1,
                     max_value=1.0,
                     value=st.session_state.get("extra_opacity", 0.55),
-                    key="extra_opacity"
+                    key="extra_opacity",
+                    help=opacity_help,
                 )
             else:
                 ui["extra_opacity"] = st.session_state.setdefault("extra_opacity", 0.55)
@@ -748,9 +958,15 @@ def build_sidebar(
                 if hasattr(gemeenten_series, "cat"):
                     gemeente_opties = [str(x) for x in gemeenten_series.cat.categories]
                 else:
-                    gemeente_opties = sorted({str(x) for x in gemeenten_series.dropna().unique()})
-                prev_gemeente_selectie = st.session_state.get("_prev_gemeente_selectie", [])
-                gemeente_default = [g for g in prev_gemeente_selectie if g in gemeente_opties]
+                    gemeente_opties = sorted(
+                        {str(x) for x in gemeenten_series.dropna().unique()}
+                    )
+                prev_gemeente_selectie = st.session_state.get(
+                    "_prev_gemeente_selectie", []
+                )
+                gemeente_default = [
+                    g for g in prev_gemeente_selectie if g in gemeente_opties
+                ]
                 if not gemeente_default:
                     if "Leeuwarden" in gemeente_opties:
                         gemeente_default = ["Leeuwarden"]
@@ -766,7 +982,7 @@ def build_sidebar(
                         default=gemeente_default,
                         key="gemeente_selectie",
                         disabled=True,
-                        help="Gemeentefilter is beschikbaar vanaf zoomniveau 11."
+                        help="Gemeentefilter is beschikbaar vanaf zoomniveau 11.",
                     )
                     mask_gemeente = pd.Series(True, index=df.index)
                     gemeente_selectie = gemeente_default
@@ -803,7 +1019,7 @@ def build_sidebar(
                     options=woonplaatsen_sorted,
                     default=woonplaatsen_sorted,
                     disabled=True,
-                    help="Woonplaatsfilter is beschikbaar vanaf zoomniveau 11."
+                    help="Woonplaatsfilter is beschikbaar vanaf zoomniveau 11.",
                 )
                 woonplaats_selectie = woonplaatsen_sorted
                 mask_wp = df["woonplaats"].isin(woonplaats_selectie)
@@ -819,7 +1035,7 @@ def build_sidebar(
                 woonplaats_selectie = st.multiselect(
                     "Filter op woonplaats:",
                     options=woonplaatsen_sorted,
-                    default=default_wp
+                    default=default_wp,
                 )
                 if not woonplaats_selectie:
                     st.warning("Selecteer minimaal één woonplaats.")
@@ -833,11 +1049,15 @@ def build_sidebar(
             # Energieklasse
             st.subheader("Energieklasse")
             df = _fillna_categorical(df, "Energieklasse", "Onbekend")
-            energieklassen = df["Energieklasse"].cat.categories if hasattr(df["Energieklasse"], "cat") else sorted(df["Energieklasse"].dropna().unique())
+            energieklassen = (
+                df["Energieklasse"].cat.categories
+                if hasattr(df["Energieklasse"], "cat")
+                else sorted(df["Energieklasse"].dropna().unique())
+            )
             energieklasse_selectie = st.multiselect(
                 "Filter op energieklasse:",
                 options=[str(x) for x in energieklassen],
-                default=[str(x) for x in energieklassen]
+                default=[str(x) for x in energieklassen],
             )
             if not energieklasse_selectie:
                 energieklasse_selectie = [str(x) for x in energieklassen]
@@ -850,16 +1070,27 @@ def build_sidebar(
             bouwjaar_num = pd.to_numeric(df["bouwjaar"], errors="coerce")
             min_year = int(np.nanmin(bouwjaar_num.to_numpy()))
             max_year = int(np.nanmax(bouwjaar_num.to_numpy()))
-            by_lo, by_hi = st.slider("Filter op bouwjaar:", min_year, max_year, (min_year, max_year))
+            by_lo, by_hi = st.slider(
+                "Filter op bouwjaar:", min_year, max_year, (min_year, max_year)
+            )
             mask_by = (bouwjaar_num >= by_lo) & (bouwjaar_num <= by_hi)
             df = df[mask_by]
             ui["bouwjaar_range"] = (by_lo, by_hi)
 
             # Type pand
             st.subheader("Type pand")
-            typepand = [str(x) for x in (df["Dataset"].cat.categories if hasattr(df["Dataset"], "cat") else df["Dataset"].dropna().unique())]
+            typepand = [
+                str(x)
+                for x in (
+                    df["Dataset"].cat.categories
+                    if hasattr(df["Dataset"], "cat")
+                    else df["Dataset"].dropna().unique()
+                )
+            ]
             typepand_opties = ["Alle types"] + sorted(typepand)
-            pand_selectie = st.selectbox("Selecteer type pand:", options=typepand_opties)
+            pand_selectie = st.selectbox(
+                "Selecteer type pand:", options=typepand_opties
+            )
             if pand_selectie != "Alle types":
                 df = df[df["Dataset"].astype(str) == pand_selectie]
             ui["pand_selectie"] = pand_selectie
@@ -878,12 +1109,18 @@ def build_sidebar(
         with st.expander("Participatie", expanded=False):
             st.session_state.participatie = st.slider(
                 "Deelnamegraad (0% = niemand sluit aan, 100% = iedereen sluit aan)",
-                min_value=0, max_value=100, value=st.session_state.participatie, step=1, key="participatie_slider"
+                min_value=0,
+                max_value=100,
+                value=st.session_state.participatie,
+                step=1,
+                key="participatie_slider",
             )
             ui["participatie"] = st.session_state.participatie
 
         # ---------------- Collectieve warmtevoorziening (analyse) ----------------
-        selected_places_prior = ui.get("woonplaats_selectie") or st.session_state.get("woonplaats_selectie", [])
+        selected_places_prior = ui.get("woonplaats_selectie") or st.session_state.get(
+            "woonplaats_selectie", []
+        )
         can_analyse = (ui["zoom_level"] >= 11) and bool(selected_places_prior)
         info_html = "<p style='font-size:12px; color:#6b7280; margin-bottom:8px;'>Analyse beschikbaar vanaf zoomniveau 11.</p>"
 
@@ -899,13 +1136,10 @@ def build_sidebar(
             else:
                 st.markdown(info_html, unsafe_allow_html=True)
                 ui["show_sites_layer"] = st.toggle(
-                    "Warmtevoorzieningen",
-                    value=False,
-                    key="show_sites_layer"
+                    "Warmtevoorzieningen", value=False, key="show_sites_layer"
                 )
 
                 if ui["show_sites_layer"]:
-                    analysis_metrics = get_hexagon_metrics(ui["zoom_level"])
                     mode_options = {
                         "auto": "Automatisch berekenen (hoogste MWh)",
                         "manual": "Handmatig kiezen op de kaart",
@@ -918,27 +1152,41 @@ def build_sidebar(
                         options=list(mode_options.keys()),
                         index=list(mode_options.keys()).index(default_mode),
                         format_func=lambda key: mode_options[key],
-                        key="sites_mode"
+                        key="sites_mode",
                     )
 
                     if ui["sites_mode"] == "auto":
                         if not st.session_state.get("sites_ready"):
-                            st.info("Stel eerst de filters in en zorg dat de kaart zichtbaar is om warmtevoorzieningen te tonen.")
-                        compute_sites = st.button("Bereken warmtevoorzieningen", key="compute_sites_button")
+                            st.info(
+                                "Stel eerst de filters in en zorg dat de kaart zichtbaar is om warmtevoorzieningen te tonen."
+                            )
+                        compute_sites = st.button(
+                            "Bereken warmtevoorzieningen", key="compute_sites_button"
+                        )
                     else:
-                        st.info("Klik op een hexagon in de kaart om deze als startpunt voor de warmtevoorziening te gebruiken.")
-                        reset_manual = st.button("Wis handmatige selectie", key="reset_manual_site")
+                        st.info(
+                            "Klik op een hexagon in de kaart om deze als startpunt voor de warmtevoorziening te gebruiken."
+                        )
+                        reset_manual = st.button(
+                            "Wis handmatige selectie", key="reset_manual_site"
+                        )
                         current_manual = st.session_state.get("manual_site_h3")
-                        st.caption(f"Geselecteerde H3-index: `{current_manual or 'geen'}`")
+                        st.caption(
+                            f"Geselecteerde H3-index: `{current_manual or 'geen'}`"
+                        )
 
                     ui["sites_hex_opacity"] = st.slider(
                         "Transparantie voorziening-hexagonen",
                         min_value=0.0,
                         max_value=1.0,
-                        value=float(st.session_state.get("sites_hex_opacity", default_site_opacity)),
+                        value=float(
+                            st.session_state.get(
+                                "sites_hex_opacity", default_site_opacity
+                            )
+                        ),
                         step=0.05,
                         key="sites_hex_opacity",
-                        help="0 = transparant (onderliggende lagen zichtbaar) | 1 = dekkend"
+                        help=opacity_help,
                     )
 
                     max_k_ring = 10 if ui["sites_mode"] == "manual" else 5
@@ -955,7 +1203,7 @@ def build_sidebar(
                         max_k_ring,
                         prev_kring,
                         1,
-                        key="kring_radius"
+                        key="kring_radius",
                     )
 
                     if ui["sites_mode"] == "auto":
@@ -987,12 +1235,31 @@ def build_sidebar(
                         ui["min_sep"] = int(st.session_state.get("min_sep", 3))
                         ui["n_sites"] = int(st.session_state.get("n_sites", 1))
 
-                    ui["cap_mwh"] = text_input_int("Capaciteit per voorziening (MWh)", key="cap_mwh", default=100_000)
-                    ui["cap_buildings"] = text_input_int("Max gebouwen per voorziening", key="cap_buildings", default=1_000)
-                    ui["fixed_cost"] = text_input_int("Vaste kosten per locatie (€)", key="fixed_cost", default=25_000)
-                    ui["var_cost"] = text_input_int("Variabele kosten (€ per MWh)", key="var_cost", default=35)
+                    ui["cap_mwh"] = text_input_int(
+                        "Capaciteit per voorziening (MWh)",
+                        key="cap_mwh",
+                        default=100_000,
+                    )
+                    ui["cap_buildings"] = text_input_int(
+                        "Max gebouwen per voorziening",
+                        key="cap_buildings",
+                        default=1_000,
+                    )
+                    ui["fixed_cost"] = text_input_int(
+                        "Vaste kosten per locatie (€)", key="fixed_cost", default=25_000
+                    )
+                    ui["var_cost"] = text_input_int(
+                        "Variabele kosten (€ per MWh)", key="var_cost", default=35
+                    )
 
-                    ui["opex_pct"] = st.number_input("Extra operationele kosten (% van vaste kosten)", min_value=0, max_value=100, value=10, step=1, key="opex_pct")
+                    ui["opex_pct"] = st.number_input(
+                        "Extra operationele kosten (% van vaste kosten)",
+                        min_value=0,
+                        max_value=100,
+                        value=10,
+                        step=1,
+                        key="opex_pct",
+                    )
 
             ui["compute_sites"] = compute_sites
             ui["reset_manual_site"] = reset_manual
@@ -1004,11 +1271,14 @@ def build_sidebar(
         # ---------------- Uitleg-blokken ----------------
         st.header("Uitleg")
         with st.expander("Uitleg H3", expanded=False):
-            st.write("H3 is een hexagonaal raster dat gebieden verdeelt in zeshoeken van verschillende resoluties. "
-                     "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte.")
+            st.write(
+                "H3 is een hexagonaal raster dat gebieden verdeelt in zeshoeken van verschillende resoluties. "
+                "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte."
+            )
 
         with st.expander("Uitleg analyse", expanded=False):
-            st.markdown("""\
+            st.markdown(
+                """\
 **Doel van de analyse**  
 De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een buurtbron of warmtenet) kansrijk kan zijn. Dit gebeurt door te kijken hoeveel gasverbruik en gebouwen er binnen de directe omgeving van een mogelijke locatie liggen en of deze plek past binnen de capaciteit van een voorziening.
 
@@ -1030,6 +1300,7 @@ De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een buurt
 - **k = 1** – directe buren, circa 7 hexagonen. Denk aan een cluster van enkele panden binnen ~200 meter.  
 - **k = 3** – kleine buurt, ±37 hexagonen. Bestrijkt ongeveer een paar straten.  
 - **k = 5** – grotere buurt, ±91 hexagonen. Omvat een deelwijk of bedrijventerrein van enkele hectares.  
-""")
+"""
+            )
 
     return df, ui

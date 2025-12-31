@@ -21,8 +21,7 @@ except Exception:  # Streamlit niet beschikbaar (CLI/tests)
 BASE_H3_RES: int = 13
 H3_AREA_RES0_KM2: float = 4_357_449.0
 AVG_HA_BY_RES: dict[int, float] = {
-    res: (H3_AREA_RES0_KM2 / (7 ** res)) * 100.0 #km2 -> ha
-    for res in range(0, 16)
+    res: (H3_AREA_RES0_KM2 / (7**res)) * 100.0 for res in range(0, 16)  # km2 -> ha
 }
 
 
@@ -87,7 +86,8 @@ WOONCORPORATIE_PATH = _env_path(
     "WARMTE_LYR_WOONCORPORATIE", LAYERS_DIR / "wooncorporatie_frl.geojson.gz"
 )
 WATER_POTENTIE_PATH = _env_path(
-    "WARMTE_LYR_WATER_POTENTIE", LAYERS_DIR / "waterlichamen_potentie_extraqt.geojson.gz"
+    "WARMTE_LYR_WATER_POTENTIE",
+    LAYERS_DIR / "waterlichamen_potentie_extraqt.geojson.gz",
 )
 BUURT_POTENTIE_PATH = _env_path(
     "WARMTE_LYR_BUURT_POTENTIE", LAYERS_DIR / "buurt_potentie_extraqt.geojson.gz"
@@ -95,9 +95,7 @@ BUURT_POTENTIE_PATH = _env_path(
 WARMTENET_PATH = _env_path(
     "WARMTE_LYR_WARMTENET", LAYERS_DIR / "warmtenet_full.geojson.gz"
 )
-WEGENNET_PATH = _env_path(
-    "WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz"
-)
+WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz")
 
 
 # ================================
@@ -170,6 +168,7 @@ LAYER_CFG = {
         "line_width": 2.0,
         "default_opacity": 0.8,
         "min_zoom": 11,
+        "coord_precision": 4,
         "default_color": [120, 120, 120, 200],
         "type_colors": {
             "network": [36, 116, 181, 220],
