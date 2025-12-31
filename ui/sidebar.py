@@ -459,7 +459,9 @@ def build_sidebar(
             is_leeuwarden = any(
                 str(g).strip().lower() == "leeuwarden" for g in selected_gemeenten
             )
-            water_pot_blocked = show_wegennet and is_leeuwarden
+            min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
+            zoom_level = int(ui.get("zoom_level", 0))
+            water_pot_blocked = show_wegennet and is_leeuwarden and zoom_level >= min_zoom
             if water_pot_blocked:
                 if st.session_state.get(water_pot_key):
                     st.session_state[water_pot_key] = False
@@ -826,9 +828,9 @@ def build_sidebar(
             ui["show_water_potentie"] = show_water_pot
             if auto_blocked_water_pot or water_pot_blocked:
                 st.warning(
-                    "Waterlichamen potentie is automatisch uitgezet omdat Wegennetten "
-                    "aanstaat bij gemeente Leeuwarden. Zet Wegennetten uit om deze laag "
-                    "te kunnen gebruiken."
+                    "De wegennetlaag van gemeente Leeuwarden is te zwaar om tegelijk "
+                    "te gebruiken met de waterpotentielaag. Schakel de wegennetlaag "
+                    "uit om deze laag te gebruiken."
                 )
             default_water_opacity = pot_meta.get("water_potentie", {}).get(
                 "default_opacity", 0.7
