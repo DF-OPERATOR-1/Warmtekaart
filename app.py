@@ -24,6 +24,7 @@ from core.config import (
     WATER_POTENTIE_PATH,
     BUURT_POTENTIE_PATH,
     WARMTENET_PATH,
+    WEGENNET_PATH,
 )
 from core.utils import (
     format_dutch_number,
@@ -43,6 +44,7 @@ from core.layers import (
     create_site_layers,
     create_extra_layers,
     create_warmtenet_layers,
+    create_wegennet_layers,
 )
 from core.h3sites import (
     shortlist_centers,
@@ -327,6 +329,33 @@ def _build_warmtenet_meta(gjson: dict | None) -> dict:
         "wp_by_key": wp_by_key,
     }
 
+
+def _build_wegennet_meta(gjson: dict | None) -> dict:
+    """Maak filter-opties voor wegennetlaag."""
+    base_meta = {
+        "woonplaatsen": [],
+        "types": [],
+        "type_labels": LAYER_CFG.get("wegennet", {}).get("type_labels", {}),
+        "default_opacity": LAYER_CFG.get("wegennet", {}).get("default_opacity", 0.8),
+    }
+    if not gjson or not isinstance(gjson, dict):
+        return base_meta
+
+    woonplaatsen_all: set[str] = set()
+    types_all: set[str] = set()
+    for feat in gjson.get("features", []):
+        props = feat.get("properties") or {}
+        wp = str(props.get("area_name") or "").strip()
+        if wp:
+            woonplaatsen_all.add(wp)
+        t = str(props.get("type") or "").strip().lower()
+        if t:
+            types_all.add(t)
+
+    base_meta["woonplaatsen"] = sorted(woonplaatsen_all)
+    base_meta["types"] = sorted(types_all)
+    return base_meta
+
 # (optioneel) live RAM-meting in sidebar
 #try:
 #    import psutil, os
@@ -435,6 +464,16 @@ gjson_warmtenet = load_geojson(
     coord_precision=5,
 )
 gjson_warmtenet = _convert_geojson_to_wgs84_if_needed(gjson_warmtenet)
+gjson_wegennet = load_geojson(
+    WEGENNET_PATH,
+    keep_props=[
+        "type",
+        "length_m",
+        "area_name",
+    ],
+    coord_precision=5,
+)
+gjson_wegennet = _convert_geojson_to_wgs84_if_needed(gjson_wegennet)
 
 potential_meta: dict[str, dict] = {}
 if gjson_water_potentie:
@@ -442,12 +481,13 @@ if gjson_water_potentie:
 if gjson_buurt_potentie:
     potential_meta["buurt_potentie"] = _build_buurt_potential_meta(gjson_buurt_potentie)
 warmtenet_meta = _build_warmtenet_meta(gjson_warmtenet)
+wegennet_meta = _build_wegennet_meta(gjson_wegennet)
 
 df_raw = load_data()
 _log_ram("after_load_data")
 
 # ========== Sidebar / UI ==========
-sidebar_out = build_sidebar(df_raw, potential_meta, warmtenet_meta)
+sidebar_out = build_sidebar(df_raw, potential_meta, warmtenet_meta, wegennet_meta)
 map_button_clicked_sidebar = False
 if isinstance(sidebar_out, tuple):
     if len(sidebar_out) == 3:
@@ -1239,6 +1279,7 @@ if st.session_state.show_map:
         "water_potentie": gjson_water_potentie,
         "buurt_potentie": gjson_buurt_potentie,
         "warmtenet": gjson_warmtenet,
+        "wegennet": gjson_wegennet,
     }
 
     extra_layers = []
@@ -1270,6 +1311,17 @@ if st.session_state.show_map:
             show_lines=bool(ui.get("warmtenet_show_lines", True)),
             show_sources=bool(ui.get("warmtenet_show_sources", True)),
             show_objects=bool(ui.get("warmtenet_show_objects", True)),
+        )
+
+    wegennet_layers: list[pdk.Layer] = []
+    wegennet_wp = ui.get("wegennet_wp_selectie", [])
+    if ui.get("show_wegennet") and gjson_wegennet and wegennet_wp:
+        wegennet_layers = create_wegennet_layers(
+            gjson_wegennet,
+            wegennet_wp,
+            ui.get("wegennet_type_selectie", []),
+            opacity=float(ui.get("wegennet_opacity", (wegennet_meta or {}).get("default_opacity", 0.8))),
+            zoom_level=int(ui.get("zoom_level", 0)),
         )
 
     # H3 hoofdlaag(en) per zoom
@@ -1382,7 +1434,7 @@ if st.session_state.show_map:
     base_layers = build_base_layers(basemap_style, hide_bg)
 
     # Volgorde: basemap -> woonlagen -> H3/indicatief/sites
-    all_layers = base_layers + extra_layers + layers + warmtenet_layers + site_layers
+    all_layers = base_layers + extra_layers + layers + wegennet_layers + warmtenet_layers + site_layers
 
     # ========== ViewState ==========
     def _view_for_selection(df_full, woonplaatsen_geselecteerd):

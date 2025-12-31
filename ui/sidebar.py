@@ -225,6 +225,7 @@ def build_sidebar(
     df_in: pd.DataFrame,
     potential_meta: dict | None = None,
     warmtenet_meta: dict | None = None,
+    wegennet_meta: dict | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Bouwt de volledige sidebar en retourneert:
@@ -395,17 +396,24 @@ def build_sidebar(
             # Model
             st.subheader("Potentiële warmtenetten")
             default_warmtenet_opacity = (warmtenet_meta or {}).get("default_opacity", 0.85)
+            default_wegennet_opacity = (wegennet_meta or {}).get("default_opacity", 0.8)
             show_warmtenet = st.toggle(
                 "Warmtenetten",
                 value=False,
                 key=LAYER_CFG["warmtenet_model"]["toggle_key"],
             )
+            show_wegennet = st.toggle(
+                "Wegennetten",
+                value=False,
+                key=LAYER_CFG["wegennet"]["toggle_key"],
+            )
             ui["show_warmtenet_model"] = show_warmtenet
+            ui["show_wegennet"] = show_wegennet
             if show_warmtenet:
                 default_show_sources = bool(st.session_state.get("warmtenet_show_sources", True))
                 default_show_objects = bool(st.session_state.get("warmtenet_show_objects", True))
                 default_show_lines = bool(st.session_state.get("warmtenet_show_lines", True))
-                st.markdown("**Onderdelen**")
+                st.markdown("**Onderdelen warmtenetlaag**")
                 show_sources = st.checkbox(
                     "Bronnen",
                     value=default_show_sources,
@@ -426,6 +434,13 @@ def build_sidebar(
                 ui["warmtenet_show_lines"] = show_lines
 
                 model_wp_options = warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
+                if "gemeentenaam" in df_in.columns:
+                    selected_gemeenten = st.session_state.get("gemeente_selectie", [])
+                    if selected_gemeenten:
+                        mask = df_in["gemeentenaam"].astype(str).isin(selected_gemeenten)
+                        allowed_wp = {str(w) for w in df_in.loc[mask, "woonplaats"].dropna().unique()}
+                        if allowed_wp:
+                            model_wp_options = [w for w in model_wp_options if w in allowed_wp]
                 prev_model_wp = [w for w in st.session_state.get("warmtenet_wp_selectie", []) if w in model_wp_options]
                 base_default = [w for w in st.session_state.get("woonplaats_selectie", []) if w in model_wp_options]
                 default_model_wp = prev_model_wp or base_default or model_wp_options
@@ -524,6 +539,77 @@ def build_sidebar(
                 ui["warmtenet_show_sources"] = st.session_state.setdefault("warmtenet_show_sources", True)
                 ui["warmtenet_show_objects"] = st.session_state.setdefault("warmtenet_show_objects", True)
                 ui["warmtenet_show_lines"] = st.session_state.setdefault("warmtenet_show_lines", True)
+
+            if show_wegennet:
+                zoom_level = int(ui.get("zoom_level", 0))
+                min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
+                st.markdown("**Onderdelen wegennetlaag**")
+                if zoom_level < min_zoom:
+                    st.info(f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}.")
+                else:
+                    wp_options = wegennet_meta.get("woonplaatsen", []) if wegennet_meta else []
+                    geselecteerde_gemeenten = st.session_state.get("gemeente_selectie", [])
+                    if geselecteerde_gemeenten and len(geselecteerde_gemeenten) != 1:
+                        st.warning("Wegennet wordt alleen getoond bij één gemeente. Ga naar Filters en kies één gemeente om deze laag te zien.")
+                        wp_options = []
+                    if "gemeentenaam" in df_in.columns and len(geselecteerde_gemeenten) == 1:
+                        mask = df_in["gemeentenaam"].astype(str).isin(geselecteerde_gemeenten)
+                        allowed_wp = sorted({str(w) for w in df_in.loc[mask, "woonplaats"].dropna().unique()})
+                        if allowed_wp:
+                            wp_options = [w for w in wp_options if w in allowed_wp]
+                    prev_wp = [w for w in st.session_state.get("wegennet_wp_selectie", []) if w in wp_options]
+                    base_default = [w for w in st.session_state.get("woonplaats_selectie", []) if w in wp_options]
+                    default_wp = prev_wp or base_default or wp_options
+                    wp_selectie = st.multiselect(
+                        "Filter op woonplaats",
+                        options=wp_options,
+                        default=default_wp,
+                    )
+                    st.session_state["wegennet_wp_selectie"] = wp_selectie
+                    ui["wegennet_wp_selectie"] = wp_selectie
+
+                    type_opts = wegennet_meta.get("types", []) if wegennet_meta else []
+                    prev_type_sel = [t for t in st.session_state.get("wegennet_type_selectie", []) if t in type_opts]
+                    default_type_sel = prev_type_sel or type_opts
+                    type_labels = (wegennet_meta or {}).get("type_labels", {})
+                    type_label_map = {str(k).lower(): v for k, v in type_labels.items()}
+                    type_selectie = st.multiselect(
+                        "Filter op type:",
+                        options=type_opts,
+                        default=default_type_sel,
+                        format_func=lambda v: type_label_map.get(str(v).lower(), v),
+                    )
+                    st.session_state["wegennet_type_selectie"] = type_selectie
+                    ui["wegennet_type_selectie"] = type_selectie
+
+                    ui["wegennet_opacity"] = st.slider(
+                        "Transparantie wegennet",
+                        min_value=0.1,
+                        max_value=1.0,
+                        value=float(st.session_state.get("wegennet_opacity", default_wegennet_opacity)),
+                        step=0.05,
+                        key="wegennet_opacity",
+                    )
+
+                    cfg_wegennet = LAYER_CFG.get("wegennet", {})
+                    type_colors = cfg_wegennet.get("type_colors", {})
+                    if type_colors and type_opts:
+                        legend_colors = [
+                            type_colors.get(t, cfg_wegennet.get("default_color", [120, 120, 120, 200]))
+                            for t in type_opts
+                        ]
+                        legend_labels = [type_label_map.get(str(t).lower(), t) for t in type_opts]
+                        render_mini_legend(
+                            cfg_wegennet.get("legend_title", "Wegennet"),
+                            legend_colors,
+                            legend_labels,
+                            dark_mode=dark_mode,
+                            footer_html="",
+                        )
+            else:
+                ui["wegennet_opacity"] = st.session_state.setdefault("wegennet_opacity", default_wegennet_opacity)
+                ui["wegennet_wp_selectie"] = st.session_state.setdefault("wegennet_wp_selectie", [])
+                ui["wegennet_type_selectie"] = st.session_state.setdefault("wegennet_type_selectie", [])
 
             # Potentielagen
             st.subheader("Aquathermie potentielagen EXTRAQT")
@@ -678,6 +764,7 @@ def build_sidebar(
                         "Filter op gemeente:",
                         options=gemeente_opties,
                         default=gemeente_default,
+                        key="gemeente_selectie",
                         disabled=True,
                         help="Gemeentefilter is beschikbaar vanaf zoomniveau 11."
                     )
@@ -688,6 +775,7 @@ def build_sidebar(
                         "Filter op gemeente:",
                         options=gemeente_opties,
                         default=gemeente_default,
+                        key="gemeente_selectie",
                     )
                     if not gemeente_selectie:
                         st.warning("Selecteer minimaal één gemeente.")

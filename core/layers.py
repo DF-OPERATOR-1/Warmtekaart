@@ -532,6 +532,95 @@ def create_extra_layers(
     return layers
 
 # ------------------------------------------------------------
+# Wegennet (vraagkant)
+# ------------------------------------------------------------
+def create_wegennet_layers(
+    gjson: dict | None,
+    woonplaatsen: list[str],
+    allowed_types: list[str] | None = None,
+    opacity: float = 0.8,
+    zoom_level: int | None = None,
+):
+    """Bouw wegennetlaag met filters op woonplaats en type."""
+    if not gjson or not isinstance(gjson, dict):
+        return []
+
+    cfg = LAYER_CFG.get("wegennet", {})
+    min_zoom = int(cfg.get("min_zoom", 11))
+    if zoom_level is not None and zoom_level < min_zoom:
+        return []
+    type_colors = cfg.get("type_colors", {})
+    type_labels = cfg.get("type_labels", {})
+    default_color = cfg.get("default_color", [120, 120, 120, 200])
+    layer_label = cfg.get("legend_title", "Wegennet")
+    line_width = float(cfg.get("line_width", 2.0))
+
+    allowed_types_set = {str(t).strip().lower() for t in allowed_types} if allowed_types else None
+    wp_filter = {str(w).strip().lower() for w in woonplaatsen} if woonplaatsen else None
+
+    feats: list[dict] = []
+
+    for feat in gjson.get("features", []):
+        if not isinstance(feat, dict):
+            continue
+        props = dict(feat.get("properties") or {})
+        woonplaats = str(props.get("area_name") or props.get("woonplaats") or "").strip()
+        if wp_filter and woonplaats.lower() not in wp_filter:
+            continue
+        type_raw = str(props.get("type") or "").strip().lower()
+        if allowed_types_set is not None and type_raw not in allowed_types_set:
+            continue
+
+        type_label = type_labels.get(type_raw, type_raw)
+        length_val = props.get("length_m")
+        try:
+            length_num = float(length_val)
+        except (TypeError, ValueError):
+            length_num = None
+        if length_num is None or math.isnan(length_num) or math.isinf(length_num):
+            length_display = "-"
+        else:
+            length_display = format_dutch_number(length_num, 0)
+
+        rows = []
+        if type_label:
+            rows.append(f"<div class='tooltip-row'>Type: {type_label}</div>")
+        if woonplaats:
+            rows.append(f"<div class='tooltip-row'>Woonplaats: {woonplaats}</div>")
+        rows.append(f"<div class='tooltip-row'>Lengte wegdeel (m): {length_display}</div>")
+
+        props["woonplaats"] = woonplaats
+        props["_layer_label"] = layer_label
+        props["geo_extra_rows"] = "".join(rows)
+        props["gemeentenaam"] = ""
+        props["buurtnaam"] = ""
+        props["gemeente_row_display"] = "none"
+        props["buurt_row_display"] = "none"
+        props["geo_section_display"] = "block"
+        props["hex_section_display"] = "none"
+        props["site_section_display"] = "none"
+        props["line_color"] = type_colors.get(type_raw, default_color)
+
+        geom = feat.get("geometry")
+        feats.append({"type": "Feature", "properties": props, "geometry": geom})
+
+    if not feats:
+        return []
+
+    layer = pdk.Layer(
+        "GeoJsonLayer",
+        data={"type": "FeatureCollection", "features": feats},
+        pickable=True,
+        stroked=True,
+        filled=False,
+        get_line_color="properties.line_color",
+        get_line_width=line_width,
+        lineWidthMinPixels=1,
+        opacity=float(opacity),
+    )
+    return [layer]
+
+# ------------------------------------------------------------
 # Warmtenet model (bronnen + leidingen)
 # ------------------------------------------------------------
 def _warmtenet_extra_rows(props: dict) -> str:
