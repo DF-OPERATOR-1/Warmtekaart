@@ -95,6 +95,9 @@ BUURT_POTENTIE_PATH = _env_path(
 WARMTENET_PATH = _env_path(
     "WARMTE_LYR_WARMTENET", LAYERS_DIR / "warmtenet_full.geojson.gz"
 )
+WEGENNET_PATH = _env_path(
+    "WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz"
+)
 
 
 # ================================
@@ -160,6 +163,22 @@ LAYER_CFG = {
         "legend_title": "Warmtebronnen (model)",
         "palette": "hsv",
         "alpha": 230,
+    },
+    "wegennet": {
+        "toggle_key": "show_wegennet",
+        "legend_title": "Potentiële wegennet",
+        "line_width": 2.0,
+        "default_opacity": 0.8,
+        "min_zoom": 11,
+        "default_color": [120, 120, 120, 200],
+        "type_colors": {
+            "network": [36, 116, 181, 220],
+            "connection": [234, 131, 72, 220],
+        },
+        "type_labels": {
+            "network": "Weg",
+            "connection": "Aansluiting",
+        },
     },
 }
 
