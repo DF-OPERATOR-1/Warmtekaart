@@ -28,61 +28,151 @@ def _kpi_css():
     st.markdown(
         """
     <style>
-    .kpi-card { background:#f6f8fb; border:1px solid #e5e7eb; border-radius:18px; padding:16px 18px; margin-bottom: 25px;}
+    .kpi-row { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items:stretch; margin:6px 0 14px; }
+    .kpi-row.kpi-row-compact { gap:6px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin:6px 0 10px; }
+    .kpi-card { background:#f6f8fb; border:1px solid #e5e7eb; border-radius:14px; padding:12px 14px; margin-bottom: 0; width: 100%; min-height: 108px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+    .kpi-card.kpi-compact { padding:6px 8px; border-radius:10px; min-height: 58px; box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04); }
     .kpi-title { margin:0 0 6px 0; font-size:14px; color:#6b7280; font-weight:600; letter-spacing:.2px }
+    .kpi-card.kpi-compact .kpi-title { font-size:11px; margin-bottom:2px; }
     .kpi-value { font-size:32px; font-weight:800; color:#0b1324; letter-spacing:.3px }
+    .kpi-card.kpi-compact .kpi-value { font-size:18px; line-height:1.1; }
     .kpi-sub { margin-top:6px; color:#6b7280; font-size:12px }
+    .kpi-card.kpi-compact .kpi-sub { font-size:10px; margin-top:2px; }
+    .kpi-center { text-align:center; }
     </style>
     """,
         unsafe_allow_html=True,
     )
 
 
-def _kpi_card(title: str, value: str, sub: str):
-    """Render één KPI-kaart met titel, hoofdwaarde en subtitel."""
-    st.markdown(
-        f"<div class='kpi-card'><div class='kpi-title'>{title}</div>"
+def _kpi_card_html(title: str, value: str, sub: str, classes: str) -> str:
+    sub_html = f"<div class='kpi-sub'>{sub}</div>" if sub else ""
+    return (
+        f"<div class='{classes}'>"
+        f"<div class='kpi-title'>{title}</div>"
         f"<div class='kpi-value'>{value}</div>"
-        f"<div class='kpi-sub'>{sub}</div></div>",
+        f"{sub_html}"
+        "</div>"
+    )
+
+
+def _kpi_card(
+    title: str,
+    value: str,
+    sub: str,
+    compact: bool = False,
+    center: bool = False,
+):
+    """Render één KPI-kaart met titel, hoofdwaarde en subtitel."""
+    classes = ["kpi-card"]
+    if compact:
+        classes.append("kpi-compact")
+    if center:
+        classes.append("kpi-center")
+    st.markdown(
+        _kpi_card_html(title, value, sub, " ".join(classes)),
         unsafe_allow_html=True,
     )
 
 
-def render_kpis(df_filtered: pd.DataFrame, participatie_pct: int):
-    """
-    Toont 4 KPI-kaarten:
-    - Totaal aantal panden
-    - Deelnamegraad (panden)
-    - Totale Warmtevraag (MWh)
-    - Deelnamegraad (MWh)
-    """
-    _kpi_css()
-
+def _compute_kpi_totals(
+    df_filtered: pd.DataFrame, participatie_pct: int
+) -> tuple[int, int, int, int]:
     # Gebruik .get met default Series om KeyError te vermijden (RAM-zuinig)
-    s_panden = pd.to_numeric(
-        df_filtered.get("aantal_huizen", pd.Series([], dtype="int32")), errors="coerce"
-    ).fillna(0)
+    if "aantal_huizen" in df_filtered.columns:
+        s_panden = pd.to_numeric(
+            df_filtered.get("aantal_huizen", pd.Series([], dtype="int32")),
+            errors="coerce",
+        ).fillna(0)
+        totaal_panden = int(s_panden.sum()) if len(s_panden) else 0
+    else:
+        totaal_panden = int(len(df_filtered))
     s_mwh = pd.to_numeric(
         df_filtered.get("gemiddeld_jaarverbruik_mWh", pd.Series([], dtype="float32")),
         errors="coerce",
     ).fillna(0)
 
-    totaal_panden = int(s_panden.sum()) if len(s_panden) else 0
     totaal_mwh = int(round(float(s_mwh.sum()))) if len(s_mwh) else 0
 
     pct = int(participatie_pct)
     panden_part = round(totaal_panden * pct / 100)
     mwh_part = round(totaal_mwh * pct / 100)
+    return totaal_panden, totaal_mwh, panden_part, mwh_part
 
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-    with c1:
-        _kpi_card("Totaal aantal panden", _nl_int(totaal_panden), "Aantal panden")
-    with c2:
-        _kpi_card(f"Deelnamegraad: {pct}%", _nl_int(panden_part), "Aantal panden")
-    with c3:
-        _kpi_card("Totale Warmtevraag", _nl_int(totaal_mwh), "MWh")
-    with c4:
-        _kpi_card(f"Deelnamegraad: {pct}%", _nl_int(mwh_part), "MWh")
+
+def render_participation_kpis(df_filtered: pd.DataFrame, participatie_pct: int) -> None:
+    _kpi_css()
+    totaal_panden, totaal_mwh, panden_part, mwh_part = _compute_kpi_totals(
+        df_filtered, participatie_pct
+    )
+    pct = int(participatie_pct)
+    html = (
+        "<div class='kpi-row kpi-row-compact'>"
+        + _kpi_card_html(
+            f"Deelnamegraad: {pct}%",
+            _nl_int(panden_part),
+            "Aantal panden",
+            "kpi-card kpi-compact kpi-center",
+        )
+        + _kpi_card_html(
+            f"Deelnamegraad: {pct}%",
+            _nl_int(mwh_part),
+            "MWh",
+            "kpi-card kpi-compact kpi-center",
+        )
+        + "</div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_kpis(
+    df_filtered: pd.DataFrame, participatie_pct: int, include_participation: bool = True
+) -> None:
+    """
+    Toont KPI-kaarten:
+    - Totaal aantal panden
+    - Totale Warmtevraag (MWh)
+    - Optioneel: deelnamegraad (panden + MWh)
+    """
+    _kpi_css()
+    totaal_panden, totaal_mwh, panden_part, mwh_part = _compute_kpi_totals(
+        df_filtered, participatie_pct
+    )
+    pct = int(participatie_pct)
+
+    cards = [
+        _kpi_card_html(
+            "Totaal aantal panden",
+            _nl_int(totaal_panden),
+            "",
+            "kpi-card kpi-center",
+        ),
+        _kpi_card_html(
+            "Totale Warmtevraag (MWh)",
+            _nl_int(totaal_mwh),
+            "",
+            "kpi-card kpi-center",
+        ),
+    ]
+    if include_participation:
+        cards.extend(
+            [
+                _kpi_card_html(
+                    f"Deelnamegraad: {pct}%",
+                    _nl_int(panden_part),
+                    "Aantal panden",
+                    "kpi-card kpi-center",
+                ),
+                _kpi_card_html(
+                    f"Deelnamegraad: {pct}%",
+                    _nl_int(mwh_part),
+                    "MWh",
+                    "kpi-card kpi-center",
+                ),
+            ]
+        )
+    html = "<div class='kpi-row'>" + "".join(cards) + "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =========================

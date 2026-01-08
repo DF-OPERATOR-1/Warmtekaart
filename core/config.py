@@ -18,7 +18,7 @@ except Exception:  # Streamlit niet beschikbaar (CLI/tests)
 # -----------------------------
 # Projectconstanten
 # -----------------------------
-BASE_H3_RES: int = 13
+BASE_H3_RES: int = 12
 H3_AREA_RES0_KM2: float = 4_357_449.0
 AVG_HA_BY_RES: dict[int, float] = {
     res: (H3_AREA_RES0_KM2 / (7**res)) * 100.0 for res in range(0, 16)  # km2 -> ha
@@ -72,9 +72,6 @@ def _env_path_opt(var: str, default: Path | None) -> Path | None:
 # -----------------------------
 DATA_CSV_PATH = _env_path("WARMTE_DATA_CSV", DATA_DIR / "data.parquet")
 DATA_CSV_URL = _env_url("WARMTE_URL_DATA_CSV")
-
-PRECOMPUTED_DIR = DATA_DIR / "precomputed"
-H3_RES13_GROUPED_PATH = PRECOMPUTED_DIR / "h3_res13_grouped.parquet"
 
 ENERGIEARMOEDE_PATH = _env_path(
     "WARMTE_LYR_ENERGIEARMOEDE", LAYERS_DIR / "energiearmoede_frl.geojson.gz"

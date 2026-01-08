@@ -82,16 +82,33 @@ if "app_initialized" not in st.session_state:
     st.session_state["app_initialized"] = True
 
 # ========== Streamlit pagina setup ==========
-st.set_page_config(page_title="Friese Warmtevraagkaart", layout="wide")
+st.set_page_config(page_title="Friese Warmteatlas", layout="wide")
 st.markdown(
-    '<h1 style="font-size: 35px;">Friese Warmtepotentiekaart</h1>',
+    """
+    <style>
+    :root { --sidebar-min-width: 340px; }
+    [data-testid="stSidebar"] {
+      min-width: var(--sidebar-min-width) !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+      min-width: var(--sidebar-min-width) !important;
+    }
+    .block-container {
+      padding-bottom: 1.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<h1 style="font-size: 35px;">Friese Warmteatlas</h1>',
     unsafe_allow_html=True,
 )
 st.markdown(
     """
     <p style="font-size: 16px; margin-top: -10px;">
-        De kaart laat het gemiddelde jaarverbruik in 2024 zien van gas in m³,
-        omgerekend naar kWh en MWh.
+        De potentie voor collectieve warmtevoorzieningen in Fryslân middels inzicht in
+        warmtevraag, warmtebronnen en sociale indicatoren.
     </p>
     """,
     unsafe_allow_html=True,
@@ -986,7 +1003,11 @@ if st.session_state.show_map:
 
     # ========== KPI ==========
     with kpi_container:
-        render_kpis(df_filtered, st.session_state.participatie)
+        render_kpis(
+            df_filtered,
+            st.session_state.participatie,
+            include_participation=False,
+        )
 
     # ========== Kaart render + cleanup ==========
     deck_kwargs = {"map_style": ui.get("map_style")}
