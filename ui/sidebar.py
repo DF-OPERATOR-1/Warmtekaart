@@ -23,6 +23,7 @@ from core.utils import (
     MWH_HA_BREAKS,
     MWH_HA_COLORS,
 )
+from ui.kpis_and_tables import render_participation_kpis
 
 
 # ---------------------------
@@ -267,6 +268,8 @@ def build_sidebar(
     ui: Dict[str, Any] = {}
     opacity_help = "0 = transparant (onderliggende lagen zichtbaar) | 1 = dekkend"
 
+    participatie_kpi_slot = None
+
     with st.sidebar:
         dark_mode = _is_dark_mode()
         st.header("Opties")
@@ -274,7 +277,7 @@ def build_sidebar(
         # ---------------- Kaart ----------------
         with st.expander("Kaart", expanded=True):
             ui["zoom_level"] = st.slider(
-                "Selecteer zoomniveau", min_value=9, max_value=13, value=10
+                "Selecteer zoomniveau", min_value=9, max_value=12, value=10
             )
             ui["resolution"] = get_dynamic_resolution(ui["zoom_level"])
             zoom_copy = ui["zoom_level"]
@@ -283,7 +286,6 @@ def build_sidebar(
                 10: 8,
                 11: 4,
                 12: 2,
-                13: 1,
             }
             approx_width_km = zoom_to_width_km.get(zoom_copy)
             if approx_width_km is not None:
@@ -301,7 +303,7 @@ def build_sidebar(
                 st.write(
                     "Het zoomniveau bepaalt hoeveel detail de kaart toont:\n"
                     "- **9–10:** Overzicht van buurten en industriegebieden in Friesland.\n"
-                    "- **11–13:** Straatniveau met H3-resolutie 13 voor maximale details.\n\n"
+                    "- **11–12:** Straatniveau met H3-resolutie 12 voor maximale details.\n\n"
                     "Elk zoomniveau heeft een vaste H3-resolutie. "
                     "Je kunt in- of uitzoomen voor visueel detail, maar de H3-resolutie blijft gelijk."
                 )
@@ -330,6 +332,19 @@ def build_sidebar(
             st.session_state["map_style"] = map_style_value
             ui["basemap_style"] = basemap_style
             st.session_state["basemap_style"] = basemap_style
+
+        # ---------------- Participatie ----------------
+        with st.expander("Participatie", expanded=False):
+            st.session_state.participatie = st.slider(
+                "Deelnamegraad (0% = niemand sluit aan, 100% = iedereen sluit aan)",
+                min_value=0,
+                max_value=100,
+                value=st.session_state.participatie,
+                step=1,
+                key="participatie_slider",
+            )
+            ui["participatie"] = st.session_state.participatie
+            participatie_kpi_slot = st.container()
 
         # ---------------- Lagen ----------------
         with st.expander("Lagen", expanded=True):
@@ -437,22 +452,28 @@ def build_sidebar(
 
             # Model
             st.subheader("Potentiële warmtenetten")
+            st.markdown("Warmtenetten op basis van")
             default_warmtenet_opacity = (warmtenet_meta or {}).get(
                 "default_opacity", 0.85
             )
             default_wegennet_opacity = (wegennet_meta or {}).get("default_opacity", 0.8)
             show_warmtenet = st.toggle(
-                "Warmtenetten",
+                "Warmtebronnen",
                 value=False,
                 key=LAYER_CFG["warmtenet_model"]["toggle_key"],
             )
             show_wegennet = st.toggle(
-                "Wegennetten",
+                "Warmtevraag",
                 value=False,
                 key=LAYER_CFG["wegennet"]["toggle_key"],
             )
             ui["show_warmtenet_model"] = show_warmtenet
             ui["show_wegennet"] = show_wegennet
+            if show_wegennet:
+                st.warning(
+                    "De weergegeven leidingen zijn een eerste verkenning en kunnen "
+                    "trajecten bevatten die in de praktijk niet haalbaar blijken."
+                )
             auto_blocked_water_pot = False
             water_pot_key = LAYER_CFG["water_potentie"]["toggle_key"]
             selected_gemeenten = st.session_state.get("gemeente_selectie", [])
@@ -901,7 +922,7 @@ def build_sidebar(
                 )
 
             # Woonlagen + mini-legenda's
-            st.subheader("Woonlagen")
+            st.subheader("Sociale indicatoren")
             show_energiearmoede = st.toggle(
                 "Energiearmoede",
                 value=False,
@@ -964,6 +985,7 @@ def build_sidebar(
                 ui["extra_opacity"] = st.session_state.setdefault("extra_opacity", 0.55)
 
         # ---------------- Filters ----------------
+        df_filtered = df_in
         with st.expander("Filters", expanded=False):
             # Werk met één boolean mask i.p.v. herhaaldelijk df=df[...]
             df = df_in  # Copy-on-write staat aan in io.py -> masken zijn zuinig
@@ -1124,18 +1146,11 @@ def build_sidebar(
                     "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik \n"
                     "- **Alliander** – Middel- tot grootverbruik\n"
                 )
+            df_filtered = df
 
-        # ---------------- Participatie ----------------
-        with st.expander("Participatie", expanded=False):
-            st.session_state.participatie = st.slider(
-                "Deelnamegraad (0% = niemand sluit aan, 100% = iedereen sluit aan)",
-                min_value=0,
-                max_value=100,
-                value=st.session_state.participatie,
-                step=1,
-                key="participatie_slider",
-            )
-            ui["participatie"] = st.session_state.participatie
+        if participatie_kpi_slot is not None:
+            with participatie_kpi_slot:
+                render_participation_kpis(df_filtered, ui["participatie"])
 
         # ---------------- Collectieve warmtevoorziening (analyse) ----------------
         selected_places_prior = ui.get("woonplaats_selectie") or st.session_state.get(
@@ -1323,4 +1338,4 @@ De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een buurt
 """
             )
 
-    return df, ui
+    return df_filtered, ui

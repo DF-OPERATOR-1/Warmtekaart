@@ -3,7 +3,6 @@ import json
 import gzip
 from pathlib import Path
 import re
-import os
 import unicodedata
 
 import orjson
@@ -17,7 +16,6 @@ from .config import (
     LAYER_CFG,
     DATA_CSV_PATH,
     DATA_CSV_URL,
-    H3_RES13_GROUPED_PATH,
     ENERGIEARMOEDE_PATH,
     KOOPWONINGEN_PATH,
     WOONCORPORATIE_PATH,
@@ -218,22 +216,13 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
     """
     # ---------- Bron bepalen ----------
     if src is None or (isinstance(src, (str, Path)) and str(src).strip() == ""):
-        use_compact = os.getenv("WARMTE_USE_COMPACT", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-        }
-        compact_candidate = DATA_CSV_PATH.parent / "data_kWh_compact.parquet"
-        if use_compact and compact_candidate.exists():
-            src = compact_candidate
+        local_parquet = DATA_CSV_PATH.with_suffix(".parquet")
+        if local_parquet.exists():
+            src = local_parquet
+        elif DATA_CSV_PATH.exists():
+            src = DATA_CSV_PATH
         else:
-            local_parquet = DATA_CSV_PATH.with_suffix(".parquet")
-            if local_parquet.exists():
-                src = local_parquet
-            elif DATA_CSV_PATH.exists():
-                src = DATA_CSV_PATH
-            else:
-                src = DATA_CSV_URL
+            src = DATA_CSV_URL
 
     # ---------- Download als URL ----------
     if isinstance(src, (str, Path)) and _is_url(str(src)):
@@ -372,35 +361,3 @@ def preload_geo_layers(ttl=3600):
         "corporatie": gj_corporatie,
     }
 
-
-@st.cache_data(show_spinner=False, max_entries=2)
-def load_precomputed_h3_grouped(ttl=3600) -> pd.DataFrame | None:
-    """
-    Laadt het pre-geaggregeerde H3-bestand indien aanwezig.
-    """
-    if not H3_RES13_GROUPED_PATH.exists():
-        return None
-    df = pd.read_parquet(H3_RES13_GROUPED_PATH)
-
-    for col in ["woonplaats", "Energieklasse", "Dataset"]:
-        if col in df.columns:
-            try:
-                df[col] = df[col].astype("category")
-            except Exception:
-                pass
-
-    for col in [
-        "sum_mwh",
-        "sum_area",
-        "sum_kwh",
-        "sum_vbos",
-        "sum_lat",
-        "sum_lon",
-        "sum_bouwjaar",
-    ]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float32")
-    if "cnt" in df.columns:
-        df["cnt"] = pd.to_numeric(df["cnt"], errors="coerce").astype("int32")
-
-    return df

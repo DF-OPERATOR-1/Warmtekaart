@@ -5,7 +5,6 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 
 ## Snel starten
 - Run: streamlit run app.py
-- Run (test only): WARMTE_USE_COMPACT=1 streamlit run app.py
 - Data: data/ (CSV/Parquet + GeoJSON lagen)
 
 ## Belangrijkste bestanden
@@ -17,7 +16,6 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - core/h3sites.py: logica voor warmtenet-analyse (warmte hotspots).
 - core/h3agg.py: H3 aggregaties en groepering van data.
 - core/map_data.py: kaartdata voorbereiden + site records opbouwen.
-- scripts/precompute_h3_rollups.py: offline aggregaties voor H3 (sneller starten).
 - scripts/geojson.py: hulpscript voor GeoJSON bewerkingen/conversie.
 
 ## Waar pas je wat aan?

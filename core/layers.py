@@ -59,7 +59,7 @@ def _fmt0(x):
 
 
 # ------------------------------------------------------------
-# GeoJSON filteren op selectie (zoom 11–13)
+# GeoJSON filteren op selectie (zoom 11–12)
 # ------------------------------------------------------------
 def filter_geojson_by_selection(
     gjson: dict, woonplaatsen: list[str] | None, zoom_level: int

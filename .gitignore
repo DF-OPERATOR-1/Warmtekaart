@@ -4,3 +4,4 @@ __pycache__/
 *.pyo
 core/__pycache__/config.cpython-312.pyc
 .streamlit
+data/data.csv
