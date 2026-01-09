@@ -118,6 +118,7 @@ def rollup_to_resolution(
     out["kWh_per_m2"] = (out["sum_kwh"] / out["cnt"]).round(0)
     out["aantal_huizen"] = out["cnt"].astype(int)
     out["gemiddeld_jaarverbruik_mWh"] = out["sum_mwh"].round(0)
+    out["sum_mwh_raw"] = out["sum_mwh"]
     out["totale_oppervlakte"] = out["sum_area"].round(0)
     out["bouwjaar"] = out["mean_bouwjaar"].round(0)
     out["aantal_VBOs"] = out["sum_vbos"].round(0).astype(int)
@@ -127,6 +128,7 @@ def rollup_to_resolution(
             "h3_index",
             "kWh_per_m2",
             "gemiddeld_jaarverbruik_mWh",
+            "sum_mwh_raw",
             "totale_oppervlakte",
             "aantal_huizen",
             "bouwjaar",

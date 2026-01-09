@@ -16,38 +16,10 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - core/h3sites.py: logica voor warmtenet-analyse (warmte hotspots).
 - core/h3agg.py: H3 aggregaties en groepering van data.
 - core/map_data.py: kaartdata voorbereiden + site records opbouwen.
-- scripts/geojson.py: hulpscript voor GeoJSON bewerkingen/conversie.
+- core/report.py: PDF-rapportage (samenvatting, tabellen, kaartpagina).
+- data/scripts/geojson.py: hulpscript voor GeoJSON bewerkingen/conversie.
 
 ## Waar pas je wat aan?
-<<<<<<< HEAD
-** App-titel en introductietekst/**
--> app.py: st.set_page_config(...) en de st.markdown(...) header.
-
-** Tooltip labels/velden per laag/**
--> core/layers.py: in de create_*_layers functies.
-
-** Kleuren van lagen en legenda/**
--> core/config.py (`LAYER_CFG`)
--> core/utils.py (kleurhelpers)
-
-** Data paden + defaults/**
--> core/config.py: bij *_PATH
-
-** GeoJSON precisie en payload/**
--> core/io.py (load_geojson, coord_precision)
-
-** Warmtenet hotspots/**
--> core/h3sites.py
-
-** H3 aggregaties/rollups/**
--> core/h3agg.py (engine) + core/map_data.py (kaart-voorbereiding)
-
-** UI filters/toggles/teksten/**
--> ui/sidebar.py
-
-** KPI tabellen en data tabel overzicht/**
--> ui/kpis_and_tables.py
-=======
 **App-titel en introductietekst**
 - app.py: st.set_page_config(...) en de st.markdown(...) header.
 
@@ -75,7 +47,10 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 
 **KPI tabellen en data tabel overzicht**
 - ui/kpis_and_tables.py
->>>>>>> upstream/main
+
+**Rapportage**
+- core/report.py: PDF-rapportage opbouwen.
+- ui/sidebar.py: upload/knoppen voor rapportage.
 
 ## Structuur per map
 **core/**
@@ -86,10 +61,16 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - `h3agg.py`: pure H3 aggregaties (snel en herbruikbaar).
 - `map_data.py`: bouwt de map-dataframes voor de kaart (filter/rollup/tooltip data).
 - `h3sites.py`: warmtenet selectie/cluster-logica.
+- `report.py`: PDF-rapportage generator.
 
 **ui/**
 - `sidebar.py`: alle filters, toggles en waarschuwingen.
 - `kpis_and_tables.py`: KPI kaarten en tabellen onder de kaart.
+
+**data/scripts/**
+- `geojson.py`: CRS-conversie + GeoJSON comprimeren.
+- `parquet_conv.py`: CSV -> Parquet en basis afgeleide velden.
+- `shrink_dataset.py`: maak compacte parquet met juiste dtypes.
 
 **app.py**
 - Orchestrator: laadt data, leest UI, berekent aggregaties, bouwt lagen en rendert.

@@ -348,7 +348,7 @@ def build_sidebar(
 
         # ---------------- Lagen ----------------
         with st.expander("Lagen", expanded=True):
-            st.subheader("Warmtevraaglaag")
+            st.subheader("Warmtevraag")
             ui["show_main_layer"] = st.toggle(
                 "Gasverbruik", value=True, key="show_main_layer"
             )
