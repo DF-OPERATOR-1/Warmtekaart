@@ -247,7 +247,12 @@ if isinstance(sidebar_out, tuple):
 else:
     df_filtered_input, ui = sidebar_out
 
-map_button_clicked_main = st.button("Maak kaart")
+def _handle_make_map_click() -> None:
+    st.session_state["show_map"] = True
+    st.session_state["_map_changed"] = False
+
+
+map_button_clicked_main = st.button("Maak kaart", on_click=_handle_make_map_click)
 map_button_clicked = bool(map_button_clicked_sidebar or map_button_clicked_main)
 _log_ram("after_sidebar")
 
@@ -482,6 +487,7 @@ if st.session_state.show_map:
     for col, dtype in [
         ("kWh_per_m2", "float32"),
         ("gemiddeld_jaarverbruik_mWh", "float32"),
+        ("sum_mwh_raw", "float32"),
         ("totale_oppervlakte", "float32"),
         ("MWh_per_ha", "float32"),
         ("MWh_per_ha_r", "float32"),
@@ -536,6 +542,7 @@ if st.session_state.show_map:
             "scaled_elevation",
             "totale_oppervlakte",
             "gemiddeld_jaarverbruik_mWh",
+            "sum_mwh_raw",
             "gemiddeld_jaarverbruik_mWh_r",
             "bouwjaar",
             "MWh_per_ha",

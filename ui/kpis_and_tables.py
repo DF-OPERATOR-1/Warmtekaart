@@ -87,8 +87,13 @@ def _compute_kpi_totals(
         totaal_panden = int(s_panden.sum()) if len(s_panden) else 0
     else:
         totaal_panden = int(len(df_filtered))
+    mwh_col = (
+        "sum_mwh_raw"
+        if "sum_mwh_raw" in df_filtered.columns
+        else "gemiddeld_jaarverbruik_mWh"
+    )
     s_mwh = pd.to_numeric(
-        df_filtered.get("gemiddeld_jaarverbruik_mWh", pd.Series([], dtype="float32")),
+        df_filtered.get(mwh_col, pd.Series([], dtype="float32")),
         errors="coerce",
     ).fillna(0)
 
