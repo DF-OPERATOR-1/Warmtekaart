@@ -19,8 +19,8 @@ gdf_4326.to_file("warmtenet_full.geojson", driver="GeoJSON")
 import gzip
 import shutil
 
-input_file = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/warmtenet_full.geojson"
-output_file = "warmtenet_full.geojson.gz"
+input_file = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/wegennet_friesland.geojson"
+output_file = "wegennet_frl.geojson.gz"
 
 with open(input_file, "rb") as f_in:
     with gzip.open(output_file, "wb") as f_out:

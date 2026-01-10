@@ -46,6 +46,7 @@ from core.map_data import (
     extract_selected_hex_from_payload,
 )
 from core.io import load_geojson, load_data, resolve_wegennet_path
+from core.report import build_report_pdf
 from ui.sidebar import build_sidebar
 from ui.kpis_and_tables import render_kpis, render_tabs
 
@@ -247,6 +248,8 @@ if isinstance(sidebar_out, tuple):
 else:
     df_filtered_input, ui = sidebar_out
 
+report_slot = ui.get("report_slot") if isinstance(ui, dict) else None
+
 def _handle_make_map_click() -> None:
     st.session_state["show_map"] = True
     st.session_state["_map_changed"] = False
@@ -262,6 +265,13 @@ st.session_state.setdefault("sites", [])
 st.session_state.setdefault("sites_costed", [])
 st.session_state.setdefault("sites_ready", False)
 st.session_state.setdefault("manual_site_h3", None)
+st.session_state.setdefault("report_pdf", None)
+st.session_state.setdefault("report_filename", None)
+st.session_state.setdefault("report_requested", False)
+st.session_state.setdefault("report_map_image", None)
+st.session_state.setdefault("report_map_image_name", None)
+st.session_state.setdefault("report_map_image_error", None)
+st.session_state.setdefault("report_upload_key", 0)
 
 st.session_state.setdefault("first_hint_shown", False)
 
@@ -299,6 +309,12 @@ def _as_tuple_2(x, default=(0, 0)):
         return (_as_int(a), _as_int(b))
     except Exception:
         return default
+
+
+def _request_report() -> None:
+    st.session_state["report_requested"] = True
+    st.session_state["show_map"] = True
+    st.session_state["_map_changed"] = False
 
 
 # ===== Filters-snapshot =====
@@ -402,6 +418,15 @@ filters_changed = current_filters != st.session_state.prev_filters
 if filters_changed:
     changed_keys = _changed_filter_keys(st.session_state.prev_filters, current_filters)
     st.session_state.prev_filters = current_filters
+    st.session_state["report_pdf"] = None
+    st.session_state["report_filename"] = None
+    st.session_state["report_requested"] = False
+    st.session_state["report_map_image"] = None
+    st.session_state["report_map_image_name"] = None
+    st.session_state["report_map_image_error"] = None
+    st.session_state["report_upload_key"] = (
+        int(st.session_state.get("report_upload_key", 0)) + 1
+    )
     woonplaats_only_change = bool(changed_keys) and changed_keys.issubset(
         {"woonplaats"}
     )
@@ -426,6 +451,10 @@ else:
     st.session_state["_map_changed"] = False
 
 if map_button_clicked:
+    st.session_state.show_map = True
+    st.session_state["_map_changed"] = False
+
+if st.session_state.get("report_requested"):
     st.session_state.show_map = True
     st.session_state["_map_changed"] = False
 
@@ -1078,6 +1107,52 @@ if st.session_state.show_map:
             st.session_state.get("sites_costed"),
         )
     st.session_state["_map_changed"] = False
+    if st.session_state.get("report_requested"):
+        layer_state = {
+            "energiearmoede": show_energiearmoede,
+            "koopwoningen": show_koopwoningen,
+            "wooncorporatie": show_corporatie,
+            "water_potentie": show_water_potentie,
+            "buurt_potentie": show_buurt_potentie,
+            "warmtenet": show_warmtenet,
+            "wegennet": bool(ui.get("show_wegennet")),
+            "sites_layer": bool(ui.get("show_sites_layer")),
+            "warmtenet_parts": {
+                "bronnen": bool(ui.get("warmtenet_show_sources")),
+                "objecten": bool(ui.get("warmtenet_show_objects")),
+                "leidingen": bool(ui.get("warmtenet_show_lines")),
+            },
+        }
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
+        with st.spinner("PDF rapport genereren..."):
+            st.session_state["report_pdf"] = build_report_pdf(
+                df_filtered,
+                ui=ui,
+                layer_state=layer_state,
+                sites_costed=st.session_state.get("sites_costed"),
+                heat_unit=heat_unit,
+                threshold_display=threshold_display,
+                map_image=st.session_state.get("report_map_image"),
+            )
+            st.session_state["report_filename"] = (
+                f"FRL_WarmteAtlas_{timestamp}.pdf"
+            )
+        st.session_state["report_requested"] = False
+    if report_slot is not None:
+        report_pdf = st.session_state.get("report_pdf")
+        report_filename = (
+            st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
+        )
+        with report_slot:
+            if report_pdf:
+                st.download_button(
+                    "Download PDF rapport",
+                    data=report_pdf,
+                    file_name=report_filename,
+                    mime="application/pdf",
+                )
+            else:
+                st.button("Maak PDF rapport", on_click=_request_report)
 
 else:
     with map_container:
@@ -1095,3 +1170,18 @@ else:
             st.session_state["first_hint_shown"] = True
         else:
             st.info("Klik op 'Maak kaart' om de kaart weer te geven.")
+    if report_slot is not None:
+        report_pdf = st.session_state.get("report_pdf")
+        report_filename = (
+            st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
+        )
+        with report_slot:
+            if report_pdf:
+                st.download_button(
+                    "Download PDF rapport",
+                    data=report_pdf,
+                    file_name=report_filename,
+                    mime="application/pdf",
+                )
+            else:
+                st.button("Maak PDF rapport", on_click=_request_report)

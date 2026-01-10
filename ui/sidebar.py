@@ -831,7 +831,7 @@ def build_sidebar(
             pot_meta = potential_meta or {}
 
             def _potentie_footer_html():
-                logo_path = Path("data/logo") / "Logo EXTRAQT black.png"
+                logo_path = Path("assets/logo") / "Logo EXTRAQT black.png"
                 if not logo_path.exists():
                     return "Bron: EXTRAQT"
                 try:
@@ -1302,6 +1302,89 @@ def build_sidebar(
                 ui["sites_mode"] = st.session_state.get("sites_mode", "auto")
             if "sites_hex_opacity" not in ui:
                 ui["sites_hex_opacity"] = default_site_opacity
+
+        # ---------------- Rapportage ----------------
+        with st.expander("Rapportage", expanded=False):
+            def _clear_report_cache():
+                st.session_state["report_pdf"] = None
+                st.session_state["report_filename"] = None
+                st.session_state["report_requested"] = False
+
+            quality_labels = {
+                300: "Standaard (A4, 300 dpi)",
+                450: "Hoog (A4, 450 dpi - 4K)",
+                600: "Ultra (A4, 600 dpi)",
+            }
+            selected_dpi = st.selectbox(
+                "PDF kwaliteit",
+                options=list(quality_labels.keys()),
+                format_func=lambda v: quality_labels[v],
+                key="report_dpi",
+                on_change=_clear_report_cache,
+            )
+            # caption removed on request
+            ui["report_dpi"] = int(selected_dpi)
+            st.write("Upload een PNG-screenshot van de kaart voor het PDF-rapport.")
+            st.markdown(
+                """
+                <style>
+                [data-testid="stFileUploaderDropzone"] {
+                  border: none;
+                  background: transparent;
+                  padding: 0;
+                }
+                [data-testid="stFileUploaderDropzone"] > div {
+                  padding: 0;
+                }
+                [data-testid="stFileUploaderDropzoneInstructions"] {
+                  display: none;
+                }
+                [data-testid="stFileUploaderDropzone"] button {
+                  font-size: 0;
+                }
+                [data-testid="stFileUploaderDropzone"] button::after {
+                  content: "Afbeelding uploaden";
+                  font-size: 16px;
+                  font-weight: 600;
+                }
+                [data-testid="stFileUploaderFile"] button {
+                  font-size: 0;
+                }
+                [data-testid="stFileUploaderFile"] button::after {
+                  content: "";
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            upload_key = int(st.session_state.get("report_upload_key", 0))
+            uploaded = st.file_uploader(
+                "Kaartafbeelding (PNG)",
+                type=["png"],
+                key=f"report_map_upload_{upload_key}",
+                label_visibility="collapsed",
+            )
+            if uploaded is not None:
+                st.session_state["report_map_image"] = uploaded.getvalue()
+                st.session_state["report_map_image_name"] = uploaded.name
+                st.session_state["report_pdf"] = None
+                st.session_state["report_filename"] = None
+                st.session_state["report_map_image_error"] = None
+            map_image = st.session_state.get("report_map_image")
+            map_image_name = st.session_state.get("report_map_image_name") or "kaart.png"
+            if map_image:
+                st.caption(f"Afbeelding klaar: {map_image_name}")
+                st.image(map_image, caption="Preview kaart", width="stretch")
+                if st.button("Verwijder kaartafbeelding", key="report_map_clear"):
+                    st.session_state["report_map_image"] = None
+                    st.session_state["report_map_image_name"] = None
+                    st.session_state["report_upload_key"] = upload_key + 1
+                    st.session_state["report_pdf"] = None
+                    st.session_state["report_filename"] = None
+                    st.session_state["report_map_image_error"] = None
+                    st.rerun()
+            report_slot = st.container()
+            ui["report_slot"] = report_slot
 
         # ---------------- Uitleg-blokken ----------------
         st.header("Uitleg")
