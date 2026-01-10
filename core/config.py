@@ -164,7 +164,7 @@ LAYER_CFG = {
     },
     "wegennet": {
         "toggle_key": "show_wegennet",
-        "legend_title": "Potentiële wegennet",
+        "legend_title": "Warmtenet op basis van warmtevraag",
         "line_width": 2.0,
         "default_opacity": 0.8,
         "min_zoom": 11,

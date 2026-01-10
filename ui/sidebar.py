@@ -502,7 +502,7 @@ def build_sidebar(
                 default_show_lines = bool(
                     st.session_state.get("warmtenet_show_lines", True)
                 )
-                st.markdown("**Onderdelen warmtenetlaag**")
+                st.markdown("**Onderdelen warmtebronnen**")
                 show_sources = st.checkbox(
                     "Bronnen",
                     value=default_show_sources,
@@ -606,7 +606,7 @@ def build_sidebar(
                 ui["warmtenet_selected_keys"] = selected_keys
                 st.session_state["warmtenet_selected_keys"] = selected_keys
                 ui["warmtenet_opacity"] = st.slider(
-                    "Transparantie warmtebron laag",
+                    "Transparantie warmtenet uit warmtebron",
                     min_value=0.1,
                     max_value=1.0,
                     value=float(
@@ -683,7 +683,7 @@ def build_sidebar(
             if show_wegennet:
                 zoom_level = int(ui.get("zoom_level", 0))
                 min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
-                st.markdown("**Onderdelen wegennetlaag**")
+                st.markdown("**Onderdelen warmtevraag**")
                 if zoom_level < min_zoom:
                     st.info(
                         f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}."
@@ -785,7 +785,7 @@ def build_sidebar(
                         ui["wegennet_type_selectie"] = type_selectie
 
                         ui["wegennet_opacity"] = st.slider(
-                            "Transparantie wegennet",
+                            "Transparantie warmtenet uit warmtevraag",
                             min_value=0.1,
                             max_value=1.0,
                             value=float(
@@ -1302,8 +1302,7 @@ def build_sidebar(
 
             quality_labels = {
                 300: "Standaard (A4, 300 dpi)",
-                450: "Hoog (A4, 450 dpi - 4K)",
-                600: "Ultra (A4, 600 dpi)",
+                240: "Compact (A4, 240 dpi)",
             }
             selected_dpi = st.selectbox(
                 "PDF kwaliteit",
