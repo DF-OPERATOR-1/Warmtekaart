@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-import tempfile
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -1676,9 +1675,7 @@ def build_report_pdf(
     report_title: str = "Friese Warmteatlas",
 ) -> bytes:
     plt, PdfPages = _lazy_matplotlib()
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    tmp_path = Path(tmp.name)
-    tmp.close()
+    buffer = io.BytesIO()
     now = datetime.now()
     heat_unit = heat_unit or ui.get("heat_unit") or "MWh/ha"
     unit_display = _normalize_unit(heat_unit)
@@ -1807,7 +1804,7 @@ def build_report_pdf(
             warmtenet_wp=ui.get("warmtenet_wp_selectie"),
             wegennet_wp=ui.get("wegennet_wp_selectie"),
         )
-    with PdfPages(tmp_path) as pdf:
+    with PdfPages(buffer) as pdf:
         if _VOORBLAD_ACHTERGROND.exists():
             fig = _render_cover_page(
                 report_title, month_year=cover_date, background=_VOORBLAD_ACHTERGROND
@@ -2210,11 +2207,4 @@ def build_report_pdf(
         pdf.savefig(fig, dpi=dpi)
         plt.close(fig)
 
-    try:
-        pdf_bytes = tmp_path.read_bytes()
-    finally:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-    return pdf_bytes
+    return buffer.getvalue()
