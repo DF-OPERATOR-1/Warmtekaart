@@ -21,6 +21,7 @@ from .config import (
     WOONCORPORATIE_PATH,
     GJ_COMMON_PROPS,
     WEGENNET_PATH,
+    WEGENNET_SUMMARY_PATH,
 )
 
 
@@ -204,6 +205,21 @@ def geojson_unique_props(path: str | Path, prop_name: str) -> list[str]:
 
 
 # ============================================================
+# Wegennet samenvatting (CSV)
+# ============================================================
+@st.cache_data(show_spinner=False, max_entries=2, ttl=3600)
+def load_wegennet_summary(path: str | Path | None = None) -> pd.DataFrame:
+    """Laad samenvatting van het wegennet per woonplaats uit CSV."""
+    p = Path(path or WEGENNET_SUMMARY_PATH)
+    if not p.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()
+
+
+# ============================================================
 # Data loader (RAM-geoptimaliseerd)
 # ============================================================
 @st.cache_data(show_spinner=False, max_entries=1)
@@ -360,4 +376,3 @@ def preload_geo_layers(ttl=3600):
         "koopwoningen": gj_koopwoningen,
         "corporatie": gj_corporatie,
     }
-

@@ -255,6 +255,7 @@ def _handle_make_map_click() -> None:
     st.session_state["_map_changed"] = False
 
 
+st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 map_button_clicked_main = st.button("Maak kaart", on_click=_handle_make_map_click)
 map_button_clicked = bool(map_button_clicked_sidebar or map_button_clicked_main)
 _log_ram("after_sidebar")
@@ -387,11 +388,6 @@ def _build_filters_snapshot(ui: dict) -> dict:
         "cap_buildings": _as_int(
             ui.get("cap_buildings", st.session_state.get("cap_buildings", 1_000))
         ),
-        "fixed_cost": _as_int(
-            ui.get("fixed_cost", st.session_state.get("fixed_cost", 25_000))
-        ),
-        "var_cost": _as_int(ui.get("var_cost", st.session_state.get("var_cost", 35))),
-        "opex_pct": _as_int(ui.get("opex_pct", st.session_state.get("opex_pct", 10))),
     }
 
 
@@ -1105,6 +1101,11 @@ if st.session_state.show_map:
             threshold_kwh,
             ui["show_sites_layer"],
             st.session_state.get("sites_costed"),
+            warmtenet_gjson=gjson_warmtenet,
+            show_warmtenet=bool(ui.get("show_warmtenet_model")),
+            show_wegennet=bool(ui.get("show_wegennet")),
+            warmtenet_wp=ui.get("warmtenet_wp_selectie", []),
+            wegennet_wp=ui.get("wegennet_wp_selectie", []),
         )
     st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):
@@ -1130,6 +1131,7 @@ if st.session_state.show_map:
                 ui=ui,
                 layer_state=layer_state,
                 sites_costed=st.session_state.get("sites_costed"),
+                warmtenet_gjson=gjson_warmtenet,
                 heat_unit=heat_unit,
                 threshold_display=threshold_display,
                 map_image=st.session_state.get("report_map_image"),

@@ -469,6 +469,11 @@ def build_sidebar(
             )
             ui["show_warmtenet_model"] = show_warmtenet
             ui["show_wegennet"] = show_wegennet
+            if not (show_warmtenet and show_wegennet):
+                st.warning(
+                    "Zet warmtebronnen en warmtevraag aan om dekking (%), "
+                    "onbenut (MWh) en kosten te tonen."
+                )
             if show_wegennet:
                 st.warning(
                     "De weergegeven leidingen zijn een eerste verkenning en kunnen "
@@ -1152,14 +1157,14 @@ def build_sidebar(
             with participatie_kpi_slot:
                 render_participation_kpis(df_filtered, ui["participatie"])
 
-        # ---------------- Collectieve warmtevoorziening (analyse) ----------------
+        # ---------------- Warmtevraag hotspots ----------------
         selected_places_prior = ui.get("woonplaats_selectie") or st.session_state.get(
             "woonplaats_selectie", []
         )
         can_analyse = (ui["zoom_level"] >= 11) and bool(selected_places_prior)
-        info_html = "<p style='font-size:12px; color:#6b7280; margin-bottom:8px;'>Analyse beschikbaar vanaf zoomniveau 11.</p>"
+        info_html = "<p style='font-size:12px; color:#6b7280; margin-bottom:8px;'>Warmtevraag hotspots beschikbaar vanaf zoomniveau 11.</p>"
 
-        with st.expander("Collectieve warmtevoorziening (analyse)", expanded=False):
+        with st.expander("Warmtevraag hotspots", expanded=False):
             default_site_opacity = st.session_state.get("sites_hex_opacity", 0.85)
             compute_sites = False
             reset_manual = False
@@ -1280,21 +1285,6 @@ def build_sidebar(
                         key="cap_buildings",
                         default=1_000,
                     )
-                    ui["fixed_cost"] = text_input_int(
-                        "Vaste kosten per locatie (€)", key="fixed_cost", default=25_000
-                    )
-                    ui["var_cost"] = text_input_int(
-                        "Variabele kosten (€ per MWh)", key="var_cost", default=35
-                    )
-
-                    ui["opex_pct"] = st.number_input(
-                        "Extra operationele kosten (% van vaste kosten)",
-                        min_value=0,
-                        max_value=100,
-                        value=10,
-                        step=1,
-                        key="opex_pct",
-                    )
 
             ui["compute_sites"] = compute_sites
             ui["reset_manual_site"] = reset_manual
@@ -1303,8 +1293,8 @@ def build_sidebar(
             if "sites_hex_opacity" not in ui:
                 ui["sites_hex_opacity"] = default_site_opacity
 
-        # ---------------- Rapportage ----------------
-        with st.expander("Rapportage", expanded=False):
+        # ---------------- Rapport samenstellen ----------------
+        with st.expander("Rapport samenstellen", expanded=False):
             def _clear_report_cache():
                 st.session_state["report_pdf"] = None
                 st.session_state["report_filename"] = None
@@ -1394,7 +1384,7 @@ def build_sidebar(
                 "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte."
             )
 
-        with st.expander("Uitleg analyse", expanded=False):
+        with st.expander("Warmtevraag hotspots", expanded=False):
             st.markdown(
                 """\
 **Doel van de analyse**  

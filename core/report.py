@@ -7,8 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 import pandas as pd
+import numpy as np
 
 from core.utils import format_dutch_number
+from core.io import load_wegennet_summary
 
 # Stijl- en lay-outconstanten (A4 in inches en genormaliseerde as-coördinaten).
 _STIJL = {
@@ -56,6 +58,9 @@ _ASSET_MAP = Path(__file__).resolve().parents[1] / "assets" / "report"  # Rappor
 _VOORBLAD_ACHTERGROND = _ASSET_MAP / "Voorblad.png"  # Achtergrond voor het voorblad.
 _SAMENVATTING_ACHTERGROND = _ASSET_MAP / "Samenvatting.png"  # Achtergrond voor samenvatting.
 _WOONPLAATSEN_ACHTERGROND = _ASSET_MAP / "Woonplaatsen.png"  # Achtergrond top woonplaatsen.
+_WARMTENET_VRAAG_ACHTERGROND = _ASSET_MAP / "Warmtenet_vraag.png"
+_WARMTENET_PANDEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_panden.png"
+_WARMTENET_KOSTEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_kosten.png"
 _KAART_ACHTERGROND = _ASSET_MAP / "Kaart.png"  # Achtergrond kaartinstellingen.
 _LAAG_ACHTERGROND = _ASSET_MAP / "Laag.png"  # Achtergrond laaginstellingen.
 _EXTRAQT_LOGO_PAD = (  # EXTRAQT-logo gebruikt in de lagentabel.
@@ -83,6 +88,9 @@ _SAMENVATTING_INDELING = {
 _WOONPLAATSEN_INDELING = {
     "table_bbox": [0.10, 0.18, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
 }
+_WARMTENET_INDELING = {
+    "table_bbox": [0.10, 0.14, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
+}
 _KAART_INDELING = {
     "table_bbox": [0.10, 0.18, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
 }
@@ -102,6 +110,10 @@ def _lazy_matplotlib():
     plt = importlib.import_module("matplotlib.pyplot")
     PdfPages = importlib.import_module("matplotlib.backends.backend_pdf").PdfPages
     return plt, PdfPages
+
+
+def _row_height_for_font(font_size: float) -> float:
+    return (font_size / 72) / _STIJL["page_portrait"][1]
 
 
 def _apply_report_style(plt) -> None:
@@ -169,7 +181,13 @@ def _format_year_range(values: Any) -> str:
     return _format_selection(values, empty_label="-")
 
 
-def _wrap_cell_text(value: Any, *, width: int) -> str:
+def _wrap_cell_text(
+    value: Any,
+    *,
+    width: int,
+    break_long_words: bool = False,
+    break_on_hyphens: bool = False,
+) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
@@ -186,15 +204,20 @@ def _wrap_cell_text(value: Any, *, width: int) -> str:
             textwrap.wrap(
                 line,
                 width=width,
-                break_long_words=False,
-                break_on_hyphens=False,
+                break_long_words=break_long_words,
+                break_on_hyphens=break_on_hyphens,
             )
         )
     return "\n".join(wrapped_lines)
 
 
 def _wrap_table_cells(
-    df: pd.DataFrame, col_widths: list[float], *, max_chars: int = 60
+    df: pd.DataFrame,
+    col_widths: list[float],
+    *,
+    max_chars: int = 60,
+    break_long_words: bool = False,
+    break_on_hyphens: bool = False,
 ) -> tuple[pd.DataFrame, list[str]]:
     if df is None or df.empty:
         return df, []
@@ -205,12 +228,528 @@ def _wrap_table_cells(
     wrapped = df.copy()
     for idx, col in enumerate(df.columns):
         width = col_char_widths[idx] if idx < len(col_char_widths) else max_chars
-        wrapped[col] = [_wrap_cell_text(v, width=width) for v in df[col].tolist()]
+        wrapped[col] = [
+            _wrap_cell_text(
+                v,
+                width=width,
+                break_long_words=break_long_words,
+                break_on_hyphens=break_on_hyphens,
+            )
+            for v in df[col].tolist()
+        ]
     header_labels = []
     for idx, col in enumerate(df.columns):
         width = col_char_widths[idx] if idx < len(col_char_widths) else max_chars
-        header_labels.append(_wrap_cell_text(str(col), width=width))
+        header_labels.append(
+            _wrap_cell_text(
+                str(col),
+                width=width,
+                break_long_words=break_long_words,
+                break_on_hyphens=break_on_hyphens,
+            )
+        )
     return wrapped, header_labels
+
+
+def _normalize_woonplaats(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_woonplaats_list(values: list[str] | None) -> set[str]:
+    return {
+        _normalize_woonplaats(v)
+        for v in (values or [])
+        if _normalize_woonplaats(v)
+    }
+
+
+def _to_float(value) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _build_warmtenet_summary(gjson: dict | None) -> pd.DataFrame:
+    cols = [
+        "woonplaats",
+        "woonplaats_norm",
+        "warmtenet_ingezet_mwh",
+        "warmtenet_object_mwh",
+        "warmtenet_lengte_m",
+        "warmtenet_aansluiting_lengte_m",
+        "warmtenet_aangesloten_panden",
+        "warmtenet_kosten_leidingen_euro",
+        "warmtenet_kosten_aansluitingen_euro",
+        "warmtenet_kosten_totaal_euro",
+        "warmtenet_kosten_bronnen_euro",
+        "warmtenet_kosten_bron_totaal_euro",
+    ]
+    if not gjson or not isinstance(gjson, dict):
+        return pd.DataFrame(columns=cols)
+
+    acc: dict[str, dict] = {}
+    for feat in gjson.get("features", []) or []:
+        if not isinstance(feat, dict):
+            continue
+        props = feat.get("properties") or {}
+        wp_raw = props.get("woonplaats")
+        if not wp_raw:
+            continue
+        wp = str(wp_raw).strip()
+        wp_norm = _normalize_woonplaats(wp)
+        if not wp_norm:
+            continue
+        entry = acc.setdefault(
+            wp_norm,
+            {
+                "woonplaats": wp,
+                "warmtenet_ingezet_mwh": 0.0,
+                "warmtenet_object_mwh": 0.0,
+                "warmtenet_lengte_m": 0.0,
+                "warmtenet_aansluiting_lengte_m": 0.0,
+                "warmtenet_aangesloten_panden": None,
+                "warmtenet_kosten_leidingen_vals": set(),
+                "warmtenet_kosten_aansluitingen_vals": set(),
+                "warmtenet_kosten_totaal_vals": set(),
+                "warmtenet_kosten_bronnen_vals": set(),
+                "warmtenet_kosten_bron_totaal_vals": set(),
+            },
+        )
+        if not entry.get("woonplaats"):
+            entry["woonplaats"] = wp
+        layer = str(props.get("layer") or "").strip().lower()
+        if layer == "bron":
+            entry["warmtenet_ingezet_mwh"] += _to_float(
+                props.get("ingezet_mwh_per_jaar")
+            )
+        elif layer == "object":
+            entry["warmtenet_object_mwh"] += _to_float(
+                props.get("vraag_mwh_per_jaar")
+            )
+            afstand_val = props.get("afstand_pad_m")
+            if afstand_val not in (None, ""):
+                try:
+                    entry["warmtenet_aansluiting_lengte_m"] += float(afstand_val)
+                except Exception:
+                    pass
+        elif layer == "leiding":
+            lengte_val = props.get("geometrie_lengte_m")
+            if lengte_val is None:
+                lengte_val = props.get("padlengte_m")
+            entry["warmtenet_lengte_m"] += _to_float(lengte_val)
+        aangesloten_val = props.get("plaats_aangesloten_objecten")
+        if aangesloten_val not in (None, ""):
+            try:
+                aangesloten_num = float(aangesloten_val)
+            except Exception:
+                aangesloten_num = None
+            if aangesloten_num is not None:
+                current = entry.get("warmtenet_aangesloten_panden")
+                if current is None or aangesloten_num > current:
+                    entry["warmtenet_aangesloten_panden"] = aangesloten_num
+        kosten_leiding = props.get("plaats_kosten_leidingen_euro")
+        if kosten_leiding not in (None, ""):
+            try:
+                entry["warmtenet_kosten_leidingen_vals"].add(float(kosten_leiding))
+            except Exception:
+                pass
+        kosten_aansl = props.get("plaats_kosten_aansluitingen_euro")
+        if kosten_aansl not in (None, ""):
+            try:
+                entry["warmtenet_kosten_aansluitingen_vals"].add(float(kosten_aansl))
+            except Exception:
+                pass
+        kosten_totaal = props.get("plaats_totale_kosten_euro")
+        if kosten_totaal not in (None, ""):
+            try:
+                entry["warmtenet_kosten_totaal_vals"].add(float(kosten_totaal))
+            except Exception:
+                pass
+        kosten_bronnen = props.get("plaats_kosten_bronnen_euro")
+        if kosten_bronnen not in (None, ""):
+            try:
+                entry["warmtenet_kosten_bronnen_vals"].add(float(kosten_bronnen))
+            except Exception:
+                pass
+        if layer == "bron":
+            kosten_bron_totaal = props.get("bron_totale_kosten_euro")
+            if kosten_bron_totaal not in (None, ""):
+                try:
+                    entry["warmtenet_kosten_bron_totaal_vals"].add(
+                        float(kosten_bron_totaal)
+                    )
+                except Exception:
+                    pass
+
+    rows = []
+    for wp_norm, entry in acc.items():
+        def _sum_vals(values: set[float]) -> float | None:
+            if not values:
+                return None
+            return float(sum(values))
+
+        rows.append(
+            {
+                "woonplaats": entry.get("woonplaats") or "",
+                "woonplaats_norm": wp_norm,
+                "warmtenet_ingezet_mwh": entry["warmtenet_ingezet_mwh"],
+                "warmtenet_object_mwh": entry["warmtenet_object_mwh"],
+                "warmtenet_lengte_m": entry["warmtenet_lengte_m"],
+                "warmtenet_aansluiting_lengte_m": entry[
+                    "warmtenet_aansluiting_lengte_m"
+                ],
+                "warmtenet_aangesloten_panden": entry["warmtenet_aangesloten_panden"],
+                "warmtenet_kosten_leidingen_euro": _sum_vals(
+                    entry["warmtenet_kosten_leidingen_vals"]
+                ),
+                "warmtenet_kosten_aansluitingen_euro": _sum_vals(
+                    entry["warmtenet_kosten_aansluitingen_vals"]
+                ),
+                "warmtenet_kosten_totaal_euro": _sum_vals(
+                    entry["warmtenet_kosten_totaal_vals"]
+                ),
+                "warmtenet_kosten_bronnen_euro": _sum_vals(
+                    entry["warmtenet_kosten_bronnen_vals"]
+                ),
+                "warmtenet_kosten_bron_totaal_euro": _sum_vals(
+                    entry["warmtenet_kosten_bron_totaal_vals"]
+                ),
+            }
+        )
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _build_wegennet_summary(df_raw: pd.DataFrame | None) -> pd.DataFrame:
+    cols = [
+        "woonplaats",
+        "woonplaats_norm",
+        "wegennet_vraag_mwh",
+        "wegennet_lengte_m",
+        "wegennet_aansluitingen",
+        "wegennet_aansluiting_lengte_m",
+    ]
+    if df_raw is None or df_raw.empty:
+        return pd.DataFrame(columns=cols)
+    df = df_raw.copy()
+    rename_map = {
+        "Woonplaats": "woonplaats",
+        "Totaal Aantal Aansluitingen": "wegennet_aansluitingen",
+        "Totaal Hittevraag (MWh/jaar)": "wegennet_vraag_mwh",
+        "Totale Lengte Netwerk (m)": "wegennet_lengte_m",
+        "Totale Lengte Aansluitingen (m)": "wegennet_aansluiting_lengte_m",
+    }
+    df.rename(columns=rename_map, inplace=True)
+    keep_cols = [c for c in rename_map.values() if c in df.columns]
+    if not keep_cols:
+        return pd.DataFrame(columns=cols)
+    df = df.loc[:, keep_cols]
+    df["woonplaats"] = df["woonplaats"].astype(str).str.strip()
+    df["woonplaats_norm"] = df["woonplaats"].map(_normalize_woonplaats)
+    for col in [
+        "wegennet_aansluitingen",
+        "wegennet_vraag_mwh",
+        "wegennet_lengte_m",
+        "wegennet_aansluiting_lengte_m",
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    return df.loc[:, cols]
+
+
+def _build_basislaag_summary(df_filtered: pd.DataFrame | None) -> pd.DataFrame:
+    cols = [
+        "woonplaats",
+        "woonplaats_norm",
+        "basis_vraag_mwh",
+        "basis_panden",
+    ]
+    if df_filtered is None or df_filtered.empty:
+        return pd.DataFrame(columns=cols)
+    if "woonplaats" not in df_filtered.columns:
+        return pd.DataFrame(columns=cols)
+    mwh_col = (
+        "sum_mwh_raw"
+        if "sum_mwh_raw" in df_filtered.columns
+        else "gemiddeld_jaarverbruik_mWh"
+    )
+    if mwh_col not in df_filtered.columns:
+        return pd.DataFrame(columns=cols)
+    if "aantal_huizen" in df_filtered.columns:
+        pand_col = "aantal_huizen"
+    elif "aantal_VBOs" in df_filtered.columns:
+        pand_col = "aantal_VBOs"
+    else:
+        pand_col = None
+
+    base_cols = ["woonplaats", mwh_col]
+    if pand_col:
+        base_cols.append(pand_col)
+    df = df_filtered.loc[:, base_cols].copy()
+    df["woonplaats"] = df["woonplaats"].astype(str).str.strip()
+    df[mwh_col] = pd.to_numeric(df[mwh_col], errors="coerce").fillna(0.0)
+    if pand_col:
+        df[pand_col] = pd.to_numeric(df[pand_col], errors="coerce").fillna(0.0)
+
+    grouped = (
+        df.groupby("woonplaats", as_index=False, sort=False, observed=True)
+        .agg({mwh_col: "sum"})
+        .rename(columns={mwh_col: "basis_vraag_mwh"})
+    )
+    if pand_col:
+        pand = (
+            df.groupby("woonplaats", as_index=False, sort=False, observed=True)
+            .agg({pand_col: "sum"})
+            .rename(columns={pand_col: "basis_panden"})
+        )
+    else:
+        pand = (
+            df.groupby("woonplaats", as_index=False, sort=False, observed=True)
+            .size()
+            .rename(columns={"size": "basis_panden"})
+        )
+    out = grouped.merge(pand, on="woonplaats", how="left")
+    out["woonplaats_norm"] = out["woonplaats"].map(_normalize_woonplaats)
+    return out.loc[:, cols]
+
+
+def _build_warmtenet_report_tables(
+    *,
+    warmtenet_gjson: dict | None,
+    df_filtered: pd.DataFrame | None,
+    warmtenet_wp: list[str] | None,
+    wegennet_wp: list[str] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None:
+    heat_loss_pct = 0.15
+    conn_length_per_pand_m = 15.0
+    cost_per_meter_net = 1000.0
+    cost_per_meter_conn = 346.0
+
+    warmtenet_df = _build_warmtenet_summary(warmtenet_gjson)
+    wegennet_df = _build_wegennet_summary(load_wegennet_summary())
+    if warmtenet_df.empty or wegennet_df.empty:
+        return None
+
+    warm_sel = _normalize_woonplaats_list(warmtenet_wp)
+    weg_sel = _normalize_woonplaats_list(wegennet_wp)
+    if warm_sel:
+        warmtenet_df = warmtenet_df[warmtenet_df["woonplaats_norm"].isin(warm_sel)]
+    if weg_sel:
+        wegennet_df = wegennet_df[wegennet_df["woonplaats_norm"].isin(weg_sel)]
+    if warmtenet_df.empty or wegennet_df.empty:
+        return None
+
+    merged = warmtenet_df.merge(
+        wegennet_df,
+        on="woonplaats_norm",
+        how="inner",
+        suffixes=("_warmtenet", "_wegennet"),
+    )
+    if merged.empty:
+        return None
+
+    basis_df = _build_basislaag_summary(df_filtered)
+    if basis_df.empty:
+        merged["basis_vraag_mwh"] = np.nan
+        merged["basis_panden"] = np.nan
+    else:
+        merged = merged.merge(
+            basis_df.loc[:, ["woonplaats_norm", "basis_vraag_mwh", "basis_panden"]],
+            on="woonplaats_norm",
+            how="left",
+        )
+
+    wp_warm = merged.get("woonplaats_warmtenet").fillna("").astype(str)
+    wp_weg = merged.get("woonplaats_wegennet").fillna("").astype(str)
+    merged["woonplaats_display"] = np.where(
+        wp_warm.str.strip() != "",
+        wp_warm,
+        wp_weg,
+    )
+
+    warmtebron_raw = pd.to_numeric(
+        merged.get("warmtenet_ingezet_mwh"), errors="coerce"
+    ).fillna(0.0)
+    warmtebron_fallback = pd.to_numeric(
+        merged.get("warmtenet_object_mwh"), errors="coerce"
+    ).fillna(0.0)
+    warmtebron_mwh = np.where(warmtebron_raw > 0, warmtebron_raw, warmtebron_fallback)
+    warmtebron_mwh = pd.Series(warmtebron_mwh, index=merged.index)
+    warmtebron_mwh_loss = warmtebron_mwh * (1.0 - heat_loss_pct)
+
+    basis_mwh = pd.to_numeric(merged.get("basis_vraag_mwh"), errors="coerce")
+    wegennet_mwh = (
+        pd.to_numeric(merged.get("wegennet_vraag_mwh"), errors="coerce")
+        .fillna(0.0)
+    )
+    basis_panden = pd.to_numeric(merged.get("basis_panden"), errors="coerce")
+    wegennet_panden = (
+        pd.to_numeric(merged.get("wegennet_aansluitingen"), errors="coerce")
+        .fillna(0.0)
+    )
+    warmtebron_panden = (
+        pd.to_numeric(merged.get("warmtenet_aangesloten_panden"), errors="coerce")
+        .fillna(0.0)
+    )
+
+    onbenut_mwh = wegennet_mwh - warmtebron_mwh_loss
+    dekking_pct = np.where(
+        (wegennet_mwh > 0) & (~pd.isna(wegennet_mwh)),
+        (warmtebron_mwh_loss / wegennet_mwh) * 100.0,
+        np.nan,
+    )
+
+    panden_niet = wegennet_panden - warmtebron_panden
+    panden_pct = np.where(
+        (wegennet_panden > 0) & (~pd.isna(wegennet_panden)),
+        (warmtebron_panden / wegennet_panden) * 100.0,
+        np.nan,
+    )
+
+    wegennet_lengte_m = pd.to_numeric(
+        merged.get("wegennet_lengte_m"), errors="coerce"
+    ).fillna(0.0)
+    warmtenet_lengte_m = pd.to_numeric(
+        merged.get("warmtenet_lengte_m"), errors="coerce"
+    ).fillna(0.0)
+    wegennet_conn_m = pd.to_numeric(
+        merged.get("wegennet_aansluiting_lengte_m"), errors="coerce"
+    ).fillna(0.0)
+    wegennet_conn_fallback = (wegennet_panden.fillna(0.0)) * conn_length_per_pand_m
+    wegennet_conn_m = np.where(
+        wegennet_conn_m > 0, wegennet_conn_m, wegennet_conn_fallback
+    )
+    wegennet_conn_m = pd.Series(wegennet_conn_m, index=merged.index)
+    warmtenet_conn_m = warmtebron_panden.fillna(0.0) * conn_length_per_pand_m
+
+    kosten_net_wegennet = wegennet_lengte_m * cost_per_meter_net
+    kosten_conn_wegennet = wegennet_conn_m * cost_per_meter_conn
+    kosten_tot_wegennet = kosten_net_wegennet + kosten_conn_wegennet
+
+    kosten_net_warmtebron = pd.to_numeric(
+        merged.get("warmtenet_kosten_leidingen_euro"), errors="coerce"
+    ).fillna(0.0)
+    kosten_conn_warmtebron = pd.to_numeric(
+        merged.get("warmtenet_kosten_aansluitingen_euro"), errors="coerce"
+    ).fillna(0.0)
+    kosten_tot_warmtebron = kosten_net_warmtebron + kosten_conn_warmtebron
+    kosten_bron_warmtebron = pd.to_numeric(
+        merged.get("warmtenet_kosten_bronnen_euro"), errors="coerce"
+    )
+    kosten_bron_warmtebron = kosten_bron_warmtebron.fillna(0.0)
+
+    def _format_series(series, decimals: int, *, prefix: str = "", suffix: str = ""):
+        s = pd.to_numeric(series, errors="coerce")
+        return s.map(
+            lambda v: ""
+            if pd.isna(v)
+            else f"{prefix}{format_dutch_number(v, decimals)}{suffix}"
+        )
+
+    out_warmte = pd.DataFrame(
+        {
+            "Woonplaats": merged["woonplaats_display"],
+            "Totaal (MWh)": basis_mwh,
+            "Warmtenet uit\nwarmtebron (MWh)": warmtebron_mwh_loss,
+            "Warmtenet uit\nwarmtevraag (MWh)": wegennet_mwh,
+            "Onbenut (MWh)": onbenut_mwh,
+            "Dekking (%)": dekking_pct,
+        }
+    ).sort_values("Woonplaats")
+    for col in [
+        "Totaal (MWh)",
+        "Warmtenet uit\nwarmtebron (MWh)",
+        "Warmtenet uit\nwarmtevraag (MWh)",
+        "Onbenut (MWh)",
+    ]:
+        out_warmte[col] = _format_series(out_warmte[col], 1)
+    out_warmte["Dekking (%)"] = _format_series(
+        out_warmte["Dekking (%)"], 1, suffix="%"
+    )
+
+    out_panden = pd.DataFrame(
+        {
+            "Woonplaats": merged["woonplaats_display"],
+            "Aantal": basis_panden,
+            "Aangesloten\nwarmtevraag": wegennet_panden,
+            "Aangesloten\nwarmtebron": warmtebron_panden,
+            "Niet\naangesloten": panden_niet,
+            "% aangesloten": panden_pct,
+        }
+    ).sort_values("Woonplaats")
+    for col in [
+        "Aantal",
+        "Aangesloten\nwarmtevraag",
+        "Aangesloten\nwarmtebron",
+        "Niet\naangesloten",
+    ]:
+        out_panden[col] = _format_series(out_panden[col], 0)
+    out_panden["% aangesloten"] = _format_series(
+        out_panden["% aangesloten"], 1, suffix="%"
+    )
+
+    def _fmt_len_cost(length_val, cost_val, length_label: str, cost_label: str) -> str:
+        length_txt = _format_series(pd.Series([length_val]), 0).iloc[0]
+        cost_txt = _format_series(pd.Series([cost_val]), 0, prefix="€ ").iloc[0]
+        parts = []
+        if length_txt:
+            parts.append(f"{length_label}: {length_txt}")
+        if cost_txt:
+            parts.append(f"{cost_label}: {cost_txt}")
+        return "\n".join(parts)
+
+    def _fmt_euro_only(value) -> str:
+        return _format_series(pd.Series([value]), 0, prefix="€ ").iloc[0]
+
+    out_leidingen = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "Woonplaats": merged["woonplaats_display"],
+                    "Type": "Vraag",
+                    "Kosten netwerk": [
+                        _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
+                        for v_len, v_cost in zip(wegennet_lengte_m, kosten_net_wegennet)
+                    ],
+                    "Kosten aansluiting": [
+                        _fmt_len_cost(
+                            v_len, v_cost, "Aansluiting (m)", "Kosten"
+                        )
+                        for v_len, v_cost in zip(wegennet_conn_m, kosten_conn_wegennet)
+                    ],
+                    "Totale kosten": [
+                        _fmt_euro_only(v) for v in kosten_tot_wegennet
+                    ],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "Woonplaats": merged["woonplaats_display"],
+                    "Type": "Bron",
+                    "Kosten netwerk": [
+                        _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
+                        for v_len, v_cost in zip(
+                            warmtenet_lengte_m, kosten_net_warmtebron
+                        )
+                    ],
+                    "Kosten aansluiting": [
+                        _fmt_len_cost(
+                            v_len, v_cost, "Aansluiting (m)", "Kosten"
+                        )
+                        for v_len, v_cost in zip(
+                            warmtenet_conn_m, kosten_conn_warmtebron
+                        )
+                    ],
+                    "Totale kosten": [
+                        _fmt_euro_only(v) for v in kosten_tot_warmtebron
+                    ],
+                }
+            ),
+        ],
+        ignore_index=True,
+    ).sort_values(["Woonplaats", "Type"])
+
+    return out_warmte, out_panden, out_leidingen
 
 
 def _expand_long_rows(
@@ -590,7 +1129,11 @@ def _build_top_woonplaatsen_table(
     if df_filtered is None or df_filtered.empty:
         return pd.DataFrame()
     col_wp = "woonplaats"
-    col_mwh = "gemiddeld_jaarverbruik_mWh"
+    col_mwh = (
+        "sum_mwh_raw"
+        if "sum_mwh_raw" in df_filtered.columns
+        else "gemiddeld_jaarverbruik_mWh"
+    )
     col_area = "area_ha"
     col_density = "MWh_per_ha"
     available_cols = set(df_filtered.columns)
@@ -660,7 +1203,6 @@ def _build_sites_table(
         "connected_buildings",
         "connected_MWh",
         "utilization_pct",
-        "indicatieve_kosten_site",
     ]
     have = [c for c in cols_keep if c in df_sites.columns]
     if not have:
@@ -672,21 +1214,16 @@ def _build_sites_table(
         out = out.head(max_rows)
 
     rename_map = {
-        "site_rank": "Voorziening #",
+        "site_rank": "Voorziening",
         "gebied_label": "Gebied",
         "connected_buildings": "Aangesloten gebouwen",
         "connected_MWh": "Aangesloten MWh",
         "utilization_pct": "Benutting (%)",
-        "indicatieve_kosten_site": "Indicatieve jaarkosten (EUR)",
     }
     out.rename(columns=rename_map, inplace=True)
-    for col in ["Voorziening #", "Aangesloten gebouwen", "Aangesloten MWh"]:
+    for col in ["Voorziening", "Aangesloten gebouwen", "Aangesloten MWh"]:
         if col in out.columns:
             out[col] = out[col].map(_fmt_int)
-    if "Indicatieve jaarkosten (EUR)" in out.columns:
-        out["Indicatieve jaarkosten (EUR)"] = out[
-            "Indicatieve jaarkosten (EUR)"
-        ].map(_fmt_int)
     if "Benutting (%)" in out.columns:
         out["Benutting (%)"] = out["Benutting (%)"].map(lambda v: _fmt_float(v, 1))
     return out
@@ -770,6 +1307,13 @@ def _render_table_page(
     bold_rows_white: bool = False,
     header_bg: str | None = None,
     header_text_color: str | None = None,
+    font_size: float | None = None,
+    wrap_max_chars: int | None = None,
+    line_spacing: float | None = None,
+    padding_weight: float | None = None,
+    cell_pad: float | None = None,
+    break_long_words: bool = False,
+    break_on_hyphens: bool = False,
 ):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
@@ -805,17 +1349,27 @@ def _render_table_page(
         x_right = _STIJL["margin_right"]
         table_bbox = [x_left, 0.08, x_right - x_left, 0.8]
 
-    line_spacing = _TABEL_REGEL_AFSTAND
-    df_wrapped, header_labels = _wrap_table_cells(df, col_widths, max_chars=60)
+    line_spacing = line_spacing if line_spacing is not None else _TABEL_REGEL_AFSTAND
+    padding_weight = (
+        padding_weight if padding_weight is not None else _TABEL_RIJ_PADDING_FACTOR
+    )
+    wrap_max_chars = wrap_max_chars if wrap_max_chars is not None else 60
+    df_wrapped, header_labels = _wrap_table_cells(
+        df,
+        col_widths,
+        max_chars=wrap_max_chars,
+        break_long_words=break_long_words,
+        break_on_hyphens=break_on_hyphens,
+    )
 
     row_lines = []
     if show_header:
         row_lines.append(
-            _row_weight(header_labels, line_spacing, _TABEL_RIJ_PADDING_FACTOR)
+            _row_weight(header_labels, line_spacing, padding_weight)
         )
     for _, row in df_wrapped.iterrows():
         row_lines.append(
-            _row_weight(row.tolist(), line_spacing, _TABEL_RIJ_PADDING_FACTOR)
+            _row_weight(row.tolist(), line_spacing, padding_weight)
         )
     total_weight = sum(row_lines) or 1
     base_row_height = None
@@ -829,8 +1383,22 @@ def _render_table_page(
         y_top = table_bbox[1] + table_bbox[3]
         table_bbox = [table_bbox[0], y_top - used_height, table_bbox[2], used_height]
 
+    def _normalize_currency_lines(value: Any) -> str:
+        text = str(value or "")
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        if len(lines) == 1:
+            return lines[0]
+        if lines[0] == "€":
+            return "€ " + " ".join(lines[1:]).strip()
+        return "\n".join(lines)
+
+    cell_rows = [
+        [_normalize_currency_lines(v) for v in row] for row in df_wrapped.values.tolist()
+    ]
     table = ax.table(
-        cellText=df_wrapped.values.tolist(),
+        cellText=cell_rows,
         colLabels=header_labels if show_header else None,
         cellLoc="left",
         colLoc="left",
@@ -838,7 +1406,7 @@ def _render_table_page(
         bbox=table_bbox,
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(_TABEL_LETTERGROOTTE)
+    table.set_fontsize(font_size or _TABEL_LETTERGROOTTE)
 
     if base_row_height is not None:
         row_heights = [base_row_height * weight for weight in row_lines]
@@ -857,7 +1425,7 @@ def _render_table_page(
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor(_STIJL["grid_color"])
         cell.set_linewidth(0.4)
-        cell.PAD = 0.05
+        cell.PAD = cell_pad if cell_pad is not None else 0.05
         if row < len(row_heights):
             cell.set_height(row_heights[row])
         data_row = row - row_offset
@@ -951,6 +1519,104 @@ def _render_table_page(
     return fig
 
 
+def _compute_table_layout(
+    df: pd.DataFrame,
+    *,
+    col_widths: list[float] | None,
+    show_header: bool,
+    max_row_height: float,
+    wrap_max_chars: int,
+    line_spacing: float,
+    padding_weight: float,
+    break_long_words: bool,
+    break_on_hyphens: bool,
+) -> tuple[pd.DataFrame, list[str], list[float], float]:
+    df_wrapped, header_labels = _wrap_table_cells(
+        df,
+        col_widths or _table_column_widths(df),
+        max_chars=wrap_max_chars,
+        break_long_words=break_long_words,
+        break_on_hyphens=break_on_hyphens,
+    )
+    row_lines: list[float] = []
+    if show_header:
+        row_lines.append(_row_weight(header_labels, line_spacing, padding_weight))
+    for _, row in df_wrapped.iterrows():
+        row_lines.append(_row_weight(row.tolist(), line_spacing, padding_weight))
+    total_weight = sum(row_lines) or 1
+    used_height = max_row_height * total_weight
+    return df_wrapped, header_labels, row_lines, used_height
+
+
+def _draw_table_on_ax(
+    ax,
+    df: pd.DataFrame,
+    *,
+    table_bbox: list[float],
+    col_widths: list[float] | None,
+    show_header: bool,
+    header_bg: str | None,
+    header_text_color: str | None,
+    font_size: float,
+    max_row_height: float,
+    wrap_max_chars: int,
+    line_spacing: float,
+    padding_weight: float,
+    cell_pad: float,
+    break_long_words: bool,
+    break_on_hyphens: bool,
+) -> float:
+    df_wrapped, header_labels, row_lines, used_height = _compute_table_layout(
+        df,
+        col_widths=col_widths,
+        show_header=show_header,
+        max_row_height=max_row_height,
+        wrap_max_chars=wrap_max_chars,
+        line_spacing=line_spacing,
+        padding_weight=padding_weight,
+        break_long_words=break_long_words,
+        break_on_hyphens=break_on_hyphens,
+    )
+    x, y, w, h = table_bbox
+    y_top = y + h
+    table_bbox = [x, y_top - used_height, w, used_height]
+
+    table = ax.table(
+        cellText=df_wrapped.values.tolist(),
+        colLabels=header_labels if show_header else None,
+        cellLoc="left",
+        colLoc="left",
+        colWidths=col_widths or None,
+        bbox=table_bbox,
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(font_size)
+
+    row_heights = [max_row_height * weight for weight in row_lines]
+    row_offset = 1 if show_header else 0
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor(_STIJL["grid_color"])
+        cell.set_linewidth(0.4)
+        cell.PAD = cell_pad
+        if row < len(row_heights):
+            cell.set_height(row_heights[row])
+        data_row = row - row_offset
+        if show_header and row == 0:
+            if header_text_color:
+                cell.set_text_props(weight="bold", color=header_text_color)
+            else:
+                cell.set_text_props(weight="bold")
+            cell.set_facecolor(header_bg or _STIJL["header_bg"])
+        else:
+            cell.set_facecolor(
+                _STIJL["row_bg"] if data_row % 2 == 0 else _STIJL["zebra_bg"]
+            )
+        text = cell.get_text()
+        text.set_va("center")
+        text.set_linespacing(line_spacing)
+    return used_height
+
+
 def _render_image_page(title: str, image_bytes: bytes):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
@@ -1002,6 +1668,7 @@ def build_report_pdf(
     ui: dict[str, Any],
     layer_state: dict[str, Any],
     sites_costed: pd.DataFrame | list | None,
+    warmtenet_gjson: dict | None = None,
     heat_unit: str | None = None,
     threshold_display: float | None = None,
     map_image: bytes | None = None,
@@ -1126,6 +1793,17 @@ def build_report_pdf(
     ]
 
     page_num = 0
+    show_warmtenet_pages = bool(
+        layer_state.get("warmtenet") and layer_state.get("wegennet")
+    )
+    warmtenet_tables = None
+    if show_warmtenet_pages:
+        warmtenet_tables = _build_warmtenet_report_tables(
+            warmtenet_gjson=warmtenet_gjson,
+            df_filtered=df_filtered,
+            warmtenet_wp=ui.get("warmtenet_wp_selectie"),
+            wegennet_wp=ui.get("wegennet_wp_selectie"),
+        )
     with PdfPages(buffer) as pdf:
         if _VOORBLAD_ACHTERGROND.exists():
             fig = _render_cover_page(
@@ -1208,6 +1886,255 @@ def build_report_pdf(
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
                 plt.close(fig)
+
+        if show_warmtenet_pages:
+            warmtenet_font_base = max(_TABEL_LETTERGROOTTE - 2, 7)
+            warmtenet_label_size = max(_STIJL["subtitle_size"] - 1, 8)
+            warmtenet_line_spacing = 1.2
+            warmtenet_padding_weight = 1.2
+            warmtenet_cell_pad = 0.03
+            warmtenet_label_gap = _row_height_for_font(warmtenet_label_size) * 0.6
+            def _start_warmtenet_fig(
+                background: Path,
+                show_title: bool,
+                title: str,
+                caption_lines: list[str] | None = None,
+            ):
+                fig = plt.figure(figsize=_STIJL["page_portrait"])
+                fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.set_position([0, 0, 1, 1])
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.axis("off")
+                bg = _load_image_array(background) if background.exists() else None
+                if bg is not None:
+                    ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto")
+                if show_title:
+                    x_left = _STIJL["margin_left"]
+                    ax.text(
+                        x_left,
+                        _STIJL["top"],
+                        title,
+                        fontsize=_STIJL["section_title_size"] + 2,
+                        fontweight="bold",
+                        va="top",
+                    )
+                caption_height = 0.0
+                if caption_lines:
+                    y_top = (
+                        _WARMTENET_INDELING["table_bbox"][1]
+                        + _WARMTENET_INDELING["table_bbox"][3]
+                    )
+                    y_cursor = y_top - 0.004
+                    for line in caption_lines:
+                        ax.text(
+                            _WARMTENET_INDELING["table_bbox"][0],
+                            y_cursor,
+                            line,
+                            fontsize=_STIJL["body_size"],
+                            color=_STIJL["muted"],
+                            va="top",
+                        )
+                        y_cursor -= _STIJL["line_height"]
+                    caption_height = len(caption_lines) * _STIJL["line_height"]
+                return fig, ax, caption_height
+
+            def _render_warmtenet_page(
+                title: str,
+                df: pd.DataFrame | None,
+                background: Path,
+            ) -> None:
+                nonlocal page_num
+                if title in ("Warmtenet_vraag", "Warmtenet_panden"):
+                    table_font_size = max(warmtenet_font_base + 2, 7)
+                elif title == "Warmtenet_kosten":
+                    table_font_size = max(warmtenet_font_base + 2, 7)
+                else:
+                    table_font_size = warmtenet_font_base
+                if df is None or df.empty:
+                    fig = _render_table_page(
+                        title,
+                        df,
+                        "Geen gegevens om te tonen.",
+                        background=background if background.exists() else None,
+                        table_bbox=(
+                            _WARMTENET_INDELING["table_bbox"]
+                            if background.exists()
+                            else None
+                        ),
+                        show_title=not background.exists(),
+                        show_header=True,
+                        max_row_height=_row_height_for_font(table_font_size)
+                        if background.exists()
+                        else None,
+                        header_bg=_STIJL["brand_blue"],
+                        header_text_color=_STIJL["row_bg"],
+                        font_size=table_font_size,
+                        line_spacing=warmtenet_line_spacing,
+                        padding_weight=warmtenet_padding_weight,
+                        cell_pad=warmtenet_cell_pad,
+                        break_long_words=True,
+                    )
+                    page_num += 1
+                    _add_page_number(fig, page_num)
+                    pdf.savefig(fig, dpi=dpi)
+                    plt.close(fig)
+                    return
+
+                max_row_height = _row_height_for_font(table_font_size)
+                if background.exists():
+                    table_bbox = _WARMTENET_INDELING["table_bbox"]
+                else:
+                    x_left = _STIJL["margin_left"]
+                    x_right = _STIJL["margin_right"]
+                    table_bbox = [x_left, 0.08, x_right - x_left, 0.8]
+                show_title = not background.exists()
+                show_header = True
+                col_widths = None
+                wrap_max_chars = 80
+                if title == "Warmtenet_panden":
+                    col_widths = [0.18, 0.12, 0.18, 0.18, 0.18, 0.16]
+                elif title == "Warmtenet_vraag":
+                    col_widths = [0.18, 0.14, 0.19, 0.19, 0.15, 0.15]
+                elif title == "Warmtenet_kosten":
+                    col_widths = [0.12, 0.34, 0.30, 0.24]
+                    wrap_max_chars = 90
+
+                group_by_woonplaats = title == "Warmtenet_kosten"
+                if not group_by_woonplaats:
+                    if table_bbox and max_row_height:
+                        header_rows = 1 if show_header else 0
+                        row_weight = 1 + warmtenet_padding_weight
+                        max_total_rows = int(
+                            table_bbox[3] / (max_row_height * row_weight)
+                        )
+                        max_rows = max(1, max_total_rows - header_rows)
+                    else:
+                        max_rows = len(df)
+                    for start in range(0, len(df), max_rows):
+                        chunk = df.iloc[start : start + max_rows]
+                        fig = _render_table_page(
+                            title,
+                            chunk,
+                            "Geen gegevens om te tonen.",
+                            background=background if background.exists() else None,
+                            table_bbox=table_bbox,
+                            show_title=show_title,
+                            show_header=show_header,
+                            max_row_height=max_row_height,
+                            header_bg=_STIJL["brand_blue"],
+                            header_text_color=_STIJL["row_bg"],
+                            col_widths=col_widths,
+                            font_size=table_font_size,
+                            wrap_max_chars=wrap_max_chars,
+                            line_spacing=warmtenet_line_spacing,
+                            padding_weight=warmtenet_padding_weight,
+                            cell_pad=warmtenet_cell_pad,
+                            break_long_words=False,
+                        )
+                        page_num += 1
+                        _add_page_number(fig, page_num)
+                        pdf.savefig(fig, dpi=dpi)
+                        plt.close(fig)
+                    return
+                if group_by_woonplaats and "Woonplaats" in df.columns:
+                    grouped = [
+                        (wp, grp.drop(columns=["Woonplaats"]))
+                        for wp, grp in df.groupby("Woonplaats", sort=False)
+                    ]
+                else:
+                    grouped = [("", df)]
+
+                caption_lines = None
+                if title == "Warmtenet_kosten":
+                    caption_lines = [
+                        "Kostenberekening: €1000/m leidingnet en €346/m aansluitingen.",
+                    ]
+                fig, ax, caption_height = _start_warmtenet_fig(
+                    background, show_title, title, caption_lines
+                )
+                y_top = table_bbox[1] + table_bbox[3]
+                y_bottom = table_bbox[1]
+                cursor = y_top - caption_height - (
+                    warmtenet_label_gap if caption_height else 0.0
+                )
+                for wp, tbl in grouped:
+                    label = str(wp).strip().upper() if group_by_woonplaats else ""
+                    label_height = (
+                        _row_height_for_font(warmtenet_label_size) * 1.6
+                        if label
+                        else 0.0
+                    )
+                    _, _, _, used_height = _compute_table_layout(
+                        tbl,
+                        col_widths=col_widths,
+                        show_header=show_header,
+                        max_row_height=max_row_height,
+                        wrap_max_chars=wrap_max_chars,
+                        line_spacing=warmtenet_line_spacing,
+                        padding_weight=warmtenet_padding_weight,
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                    )
+                    required = label_height + used_height
+                    if cursor - required < y_bottom:
+                        page_num += 1
+                        _add_page_number(fig, page_num)
+                        pdf.savefig(fig, dpi=dpi)
+                        plt.close(fig)
+                        fig, ax, caption_height = _start_warmtenet_fig(
+                            background, show_title, title, caption_lines
+                        )
+                        cursor = y_top - caption_height - (
+                            warmtenet_label_gap if caption_height else 0.0
+                        )
+                    if label:
+                        ax.text(
+                            table_bbox[0],
+                            cursor - label_height * 0.1,
+                            label,
+                            fontsize=warmtenet_label_size,
+                            fontweight="bold",
+                            va="top",
+                        )
+                    table_y = cursor - label_height - used_height
+                    _draw_table_on_ax(
+                        ax,
+                        tbl,
+                        table_bbox=[table_bbox[0], table_y, table_bbox[2], used_height],
+                        col_widths=col_widths,
+                        show_header=show_header,
+                        header_bg=_STIJL["brand_blue"],
+                        header_text_color=_STIJL["row_bg"],
+                        font_size=table_font_size,
+                        max_row_height=max_row_height,
+                        wrap_max_chars=wrap_max_chars,
+                        line_spacing=warmtenet_line_spacing,
+                        padding_weight=warmtenet_padding_weight,
+                        cell_pad=warmtenet_cell_pad,
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                    )
+                    cursor = table_y - warmtenet_label_gap
+
+                page_num += 1
+                _add_page_number(fig, page_num)
+                pdf.savefig(fig, dpi=dpi)
+                plt.close(fig)
+
+            warmte_df = panden_df = kosten_df = None
+            if warmtenet_tables:
+                warmte_df, panden_df, kosten_df = warmtenet_tables
+            _render_warmtenet_page(
+                "Warmtenet_vraag", warmte_df, _WARMTENET_VRAAG_ACHTERGROND
+            )
+            _render_warmtenet_page(
+                "Warmtenet_panden", panden_df, _WARMTENET_PANDEN_ACHTERGROND
+            )
+            _render_warmtenet_page(
+                "Warmtenet_kosten", kosten_df, _WARMTENET_KOSTEN_ACHTERGROND
+            )
 
         kaart_bbox = _KAART_INDELING["table_bbox"] if _KAART_ACHTERGROND.exists() else None
         kaart_show_title = not _KAART_ACHTERGROND.exists()

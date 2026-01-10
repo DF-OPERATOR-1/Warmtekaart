@@ -247,22 +247,8 @@ def build_site_records(
             "cap_MWh_fmt": _fmt0s(rec.cap_MWh),
             "connected_MWh_fmt": _fmt0s(rec.connected_MWh),
             "utilization_pct_fmt": f"{int(rec.utilization_pct)}",
-            "vaste_kosten": float(st.session_state.fixed_cost),
-            "opex": float(st.session_state.opex_pct)
-            / 100.0
-            * float(st.session_state.fixed_cost),
-            "variabele_kosten": float(rec.connected_MWh)
-            * float(st.session_state.var_cost),
         }
-
-        record["indicatieve_kosten_site"] = int(
-            round(
-                record["vaste_kosten"]
-                + record["opex"]
-                + record["variabele_kosten"]
-            )
-        )
-        record["hex_section_display"] = "block"
+        record["hex_section_display"] = "none"
         record["site_section_display"] = "block"
         record["geo_section_display"] = "none"
         record["geo_extra_rows"] = ""

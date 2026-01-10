@@ -93,6 +93,9 @@ WARMTENET_PATH = _env_path(
     "WARMTE_LYR_WARMTENET", LAYERS_DIR / "warmtenet_full.geojson.gz"
 )
 WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz")
+WEGENNET_SUMMARY_PATH = _env_path(
+    "WARMTE_WEGENNET_CSV", DATA_DIR / "wegennet" / "wegennet.csv"
+)
 
 
 # ================================

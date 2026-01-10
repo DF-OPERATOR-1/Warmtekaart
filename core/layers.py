@@ -714,19 +714,7 @@ def create_site_layers(
             }
         )
 
-    if scatter_records:
-        site_layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                scatter_records,
-                pickable=True,
-                get_position=["lon", "lat"],
-                get_radius=25,
-                get_fill_color="fill_color",
-                radius_min_pixels=6,
-                radius_max_pixels=10,
-            )
-        )
+    # Dot markers verwijderd; de groene hexagonen bevatten de tooltipinformatie.
 
     return site_layers
 
