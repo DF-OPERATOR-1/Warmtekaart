@@ -1301,13 +1301,17 @@ def build_sidebar(
                 st.session_state["report_requested"] = False
 
             quality_labels = {
+                150: "Compact (A4, 150 dpi)",
+                200: "Licht (A4, 200 dpi)",
                 300: "Standaard (A4, 300 dpi)",
                 450: "Hoog (A4, 450 dpi - 4K)",
                 600: "Ultra (A4, 600 dpi)",
             }
+            dpi_options = [150, 200, 300, 450, 600]
             selected_dpi = st.selectbox(
                 "PDF kwaliteit",
-                options=list(quality_labels.keys()),
+                options=dpi_options,
+                index=1,
                 format_func=lambda v: quality_labels[v],
                 key="report_dpi",
                 on_change=_clear_report_cache,

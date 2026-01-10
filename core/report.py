@@ -36,6 +36,7 @@ _STIJL = {
     "muted": "#6b7280",  # Gedempte tekstkleur.
     "dpi": 300,  # Standaard DPI voor PDF-rendering.
 }
+_MAX_IMAGE_DPI = 300  # Max DPI voor ingesloten afbeeldingen om RAM te beperken.
 _TABEL_REGEL_AFSTAND = 1.5  # Regelafstand binnen tabelceltekst.
 _TABEL_LETTERGROOTTE = _STIJL["body_size"] + 1  # Lettergrootte voor tabellen.
 _TABEL_RIJ_HOOGTE = (_TABEL_LETTERGROOTTE / 72) / _STIJL["page_portrait"][1]  # Basisrijhoogte.
@@ -124,6 +125,7 @@ def _apply_report_style(plt) -> None:
             "font.family": "DejaVu Sans",
             "font.size": _STIJL["body_size"],
             "axes.edgecolor": _STIJL["grid_color"],
+            "pdf.compression": 9,
         }
     )
 
@@ -861,14 +863,115 @@ def _format_dutch_datetime(dt: datetime) -> str:
     return f"{dt.day} {month} {dt.year} {dt:%H:%M}"
 
 
-def _load_image_array(path: Path):
+def _max_page_side_px(dpi: int) -> int:
+    try:
+        width_px = int(round(_STIJL["page_portrait"][0] * dpi))
+        height_px = int(round(_STIJL["page_portrait"][1] * dpi))
+    except Exception:
+        return int(round(max(_STIJL["page_portrait"]) * _STIJL["dpi"]))
+    return max(width_px, height_px)
+
+
+def _normalize_image_array(img):
+    if img is None:
+        return img
+    arr = img
+    if np.issubdtype(arr.dtype, np.floating):
+        try:
+            max_val = float(np.nanmax(arr))
+        except Exception:
+            max_val = 1.0
+        if max_val <= 1.0:
+            arr = np.clip(arr, 0.0, 1.0)
+            arr = (arr * 255.0).round().astype(np.uint8)
+        else:
+            arr = np.clip(arr, 0.0, 255.0).round().astype(np.uint8)
+    elif arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=False)
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        try:
+            if np.all(arr[:, :, 3] == 255):
+                arr = arr[:, :, :3]
+        except Exception:
+            pass
+    return arr
+
+
+def _downscale_image_array(img, max_side_px: int | None):
+    if img is None or not max_side_px:
+        return _normalize_image_array(img)
+    try:
+        height, width = int(img.shape[0]), int(img.shape[1])
+    except Exception:
+        return _normalize_image_array(img)
+    if max(height, width) <= max_side_px:
+        return _normalize_image_array(img)
+    scale = max_side_px / float(max(height, width))
+    new_w = max(1, int(round(width * scale)))
+    new_h = max(1, int(round(height * scale)))
+    if new_w == width and new_h == height:
+        return _normalize_image_array(img)
+    x_idx = np.linspace(0, width - 1, new_w).astype(int)
+    y_idx = np.linspace(0, height - 1, new_h).astype(int)
+    return _normalize_image_array(img[np.ix_(y_idx, x_idx)])
+
+
+def _load_image_array(path: Path, *, max_side_px: int | None = None):
     if not path.exists():
         return None
     plt, _ = _lazy_matplotlib()
     try:
-        return plt.imread(str(path))
+        img = plt.imread(str(path))
     except Exception:
         return None
+    return _downscale_image_array(img, max_side_px)
+
+
+def _load_image_from_bytes(image_bytes: bytes, *, max_side_px: int | None = None):
+    if not image_bytes:
+        return None
+    try:
+        import matplotlib.image as mpimg
+
+        img = mpimg.imread(io.BytesIO(image_bytes))
+    except Exception:
+        return None
+    return _downscale_image_array(img, max_side_px)
+
+
+def _encode_png_bytes(img) -> bytes | None:
+    if img is None:
+        return None
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        if img.ndim == 2:
+            mode = "L"
+        elif img.ndim == 3 and img.shape[2] == 3:
+            mode = "RGB"
+        elif img.ndim == 3 and img.shape[2] == 4:
+            mode = "RGBA"
+        else:
+            return None
+        im = Image.fromarray(img, mode=mode)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def prepare_report_image_bytes(
+    image_bytes: bytes | None, *, dpi: int | None = None
+) -> bytes | None:
+    if not image_bytes:
+        return None
+    max_side_px = _max_page_side_px(min(_select_dpi(dpi), _MAX_IMAGE_DPI))
+    img = _load_image_from_bytes(image_bytes, max_side_px=max_side_px)
+    encoded = _encode_png_bytes(img)
+    return encoded or image_bytes
 
 
 def _as_schaal(ax, x: float, y: float, width: float, height: float) -> tuple[float, float]:
@@ -952,7 +1055,13 @@ def _draw_image_cover(
     )
 
 
-def _render_cover_page(title: str, *, month_year: str, background: Path | None = None):
+def _render_cover_page(
+    title: str,
+    *,
+    month_year: str,
+    background: Path | None = None,
+    image_max_side_px: int | None = None,
+):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
     fig = plt.figure(figsize=_STIJL["page_portrait"])
@@ -962,7 +1071,11 @@ def _render_cover_page(title: str, *, month_year: str, background: Path | None =
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-    bg = _load_image_array(background) if background else None
+    bg = (
+        _load_image_array(background, max_side_px=image_max_side_px)
+        if background
+        else None
+    )
     if bg is not None:
         ax.set_aspect("auto")
         ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto", interpolation="lanczos")
@@ -984,6 +1097,7 @@ def _render_summary_page(
     kpis: list[tuple[str, str, str]],
     map_image: bytes | None,
     background: Path | None = None,
+    image_max_side_px: int | None = None,
 ):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
@@ -994,7 +1108,11 @@ def _render_summary_page(
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-    bg = _load_image_array(background) if background else None
+    bg = (
+        _load_image_array(background, max_side_px=image_max_side_px)
+        if background
+        else None
+    )
     if bg is not None:
         ax.set_aspect("auto")
         ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto", interpolation="lanczos")
@@ -1046,9 +1164,9 @@ def _render_summary_page(
     )
     if map_image:
         try:
-            import matplotlib.image as mpimg
-
-            img = mpimg.imread(io.BytesIO(map_image))
+            img = _load_image_from_bytes(
+                map_image, max_side_px=image_max_side_px
+            )
             _draw_image_cover(
                 ax,
                 img,
@@ -1306,6 +1424,7 @@ def _render_table_page(
     empty_message: str,
     *,
     background: Path | None = None,
+    image_max_side_px: int | None = None,
     table_bbox: list[float] | None = None,
     show_title: bool = True,
     show_header: bool = True,
@@ -1335,7 +1454,11 @@ def _render_table_page(
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-    bg = _load_image_array(background) if background else None
+    bg = (
+        _load_image_array(background, max_side_px=image_max_side_px)
+        if background
+        else None
+    )
     if bg is not None:
         ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto")
     if show_title:
@@ -1473,7 +1596,7 @@ def _render_table_page(
             path = item.get("path")
             if not path:
                 continue
-            img = _load_image_array(Path(path))
+            img = _load_image_array(Path(path), max_side_px=image_max_side_px)
             if img is None:
                 continue
             row_index = item.get("row")
@@ -1628,14 +1751,15 @@ def _draw_table_on_ax(
     return used_height
 
 
-def _render_image_page(title: str, image_bytes: bytes):
+def _render_image_page(
+    title: str, image_bytes: bytes, *, image_max_side_px: int | None = None
+):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
     page_size = _STIJL["page_portrait"]
+    img = None
     try:
-        import matplotlib.image as mpimg
-
-        img = mpimg.imread(io.BytesIO(image_bytes))
+        img = _load_image_from_bytes(image_bytes, max_side_px=image_max_side_px)
         if getattr(img, "shape", None) is not None:
             height = img.shape[0]
             width = img.shape[1]
@@ -1657,9 +1781,7 @@ def _render_image_page(title: str, image_bytes: bytes):
     ax.axis("off")
     try:
         if img is None:
-            import matplotlib.image as mpimg
-
-            img = mpimg.imread(io.BytesIO(image_bytes))
+            img = _load_image_from_bytes(image_bytes, max_side_px=image_max_side_px)
         ax.imshow(img, interpolation="lanczos")
         ax.set_aspect("equal", adjustable="box")
     except Exception:
@@ -1702,6 +1824,7 @@ def build_report_pdf(
         else ui.get("threshold_display", ui.get("threshold", ""))
     )
     dpi = _select_dpi(ui.get("report_dpi"))
+    image_max_side_px = _max_page_side_px(min(dpi, _MAX_IMAGE_DPI))
     participatie_pct = ui.get("participatie", 0)
     records, totaal_panden, totaal_mwh, panden_part, mwh_part = _compute_totals(
         df_filtered, participatie_pct
@@ -1824,7 +1947,10 @@ def build_report_pdf(
     with PdfPages(tmp_path) as pdf:
         if _VOORBLAD_ACHTERGROND.exists():
             fig = _render_cover_page(
-                report_title, month_year=cover_date, background=_VOORBLAD_ACHTERGROND
+                report_title,
+                month_year=cover_date,
+                background=_VOORBLAD_ACHTERGROND,
+                image_max_side_px=image_max_side_px,
             )
             page_num += 1
             pdf.savefig(fig, dpi=dpi)
@@ -1835,6 +1961,7 @@ def build_report_pdf(
                 kpis=kpi_items,
                 map_image=map_image,
                 background=_SAMENVATTING_ACHTERGROND,
+                image_max_side_px=image_max_side_px,
             )
             page_num += 1
             _add_page_number(fig, page_num)
@@ -1847,7 +1974,9 @@ def build_report_pdf(
             pdf.savefig(fig, dpi=dpi)
             _close_figure(fig, plt)
             if map_image:
-                fig = _render_image_page("Kaart", map_image)
+                fig = _render_image_page(
+                    "Kaart", map_image, image_max_side_px=image_max_side_px
+                )
                 page_num += 1
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
@@ -1866,6 +1995,7 @@ def build_report_pdf(
                 top_wp,
                 "Geen gegevens om te tonen.",
                 background=_WOONPLAATSEN_ACHTERGROND if _WOONPLAATSEN_ACHTERGROND.exists() else None,
+                image_max_side_px=image_max_side_px,
                 table_bbox=table_bbox,
                 show_title=show_title,
                 show_header=show_header,
@@ -1892,6 +2022,7 @@ def build_report_pdf(
                     chunk,
                     "Geen gegevens om te tonen.",
                     background=_WOONPLAATSEN_ACHTERGROND if _WOONPLAATSEN_ACHTERGROND.exists() else None,
+                    image_max_side_px=image_max_side_px,
                     table_bbox=table_bbox,
                     show_title=show_title,
                     show_header=show_header,
@@ -1924,7 +2055,13 @@ def build_report_pdf(
                 ax.set_xlim(0, 1)
                 ax.set_ylim(0, 1)
                 ax.axis("off")
-                bg = _load_image_array(background) if background.exists() else None
+                bg = (
+                    _load_image_array(
+                        background, max_side_px=image_max_side_px
+                    )
+                    if background.exists()
+                    else None
+                )
                 if bg is not None:
                     ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto")
                 if show_title:
@@ -1975,6 +2112,7 @@ def build_report_pdf(
                         df,
                         "Geen gegevens om te tonen.",
                         background=background if background.exists() else None,
+                        image_max_side_px=image_max_side_px,
                         table_bbox=(
                             _WARMTENET_INDELING["table_bbox"]
                             if background.exists()
@@ -2036,6 +2174,7 @@ def build_report_pdf(
                             chunk,
                             "Geen gegevens om te tonen.",
                             background=background if background.exists() else None,
+                            image_max_side_px=image_max_side_px,
                             table_bbox=table_bbox,
                             show_title=show_title,
                             show_header=show_header,
@@ -2178,6 +2317,7 @@ def build_report_pdf(
                 chunk,
                 "Geen gegevens om te tonen.",
                 background=_KAART_ACHTERGROND if _KAART_ACHTERGROND.exists() else None,
+                image_max_side_px=image_max_side_px,
                 table_bbox=kaart_bbox,
                 show_title=kaart_show_title,
                 show_header=kaart_show_header,
@@ -2209,6 +2349,7 @@ def build_report_pdf(
             layers_table,
             "Geen gegevens om te tonen.",
             background=_LAAG_ACHTERGROND if _LAAG_ACHTERGROND.exists() else None,
+            image_max_side_px=image_max_side_px,
             table_bbox=_LAAG_INDELING["table_bbox"] if _LAAG_ACHTERGROND.exists() else None,
             show_title=not _LAAG_ACHTERGROND.exists(),
             show_header=not _LAAG_ACHTERGROND.exists(),

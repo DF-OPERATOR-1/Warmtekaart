@@ -270,7 +270,6 @@ def build_site_records(
 
         coverage_polygons = []
         coverage_summary: dict[str, Any] = {}
-        coverage_buildings: list[dict[str, Any]] = []
         coverage_hexes: list[dict[str, Any]] = []
 
         if hex_ids:
@@ -421,26 +420,13 @@ def build_site_records(
                 }
                 coverage_hexes.append(cov_dict)
 
-            if "polygon_shape" in df_site_hex.columns:
-                coverage_buildings = df_site_hex.loc[
-                    :, ["h3_index", "polygon_shape"]
-                ].copy()
-                coverage_buildings["polygon_shape"] = coverage_buildings[
-                    "polygon_shape"
-                ].astype(str)
-                coverage_buildings["site_rank"] = idx
-                coverage_buildings["gebouw_id"] = coverage_buildings.index.astype(int) + 1
-                coverage_buildings = coverage_buildings.to_dict("records")
-
         density_value = coverage_summary.get("MWh_per_ha", 0.0) if coverage_summary else 0.0
         record["MWh_per_ha"] = float(density_value or 0.0)
         record["MWh_per_ha_fmt"] = _fmt2s(record["MWh_per_ha"])
 
         record["coverage_polygons"] = coverage_polygons
         record["coverage_summary"] = coverage_summary
-        record["coverage_buildings"] = coverage_buildings
         record["coverage_hexes"] = coverage_hexes
-        record["coverage_hex_ids"] = hex_ids
         record["lat"], record["lon"] = h3.cell_to_latlng(rec.h3_index)
         records.append(record)
 

@@ -4,11 +4,30 @@ from __future__ import annotations
 # ========== Imports ==========
 import gc
 from pathlib import Path
+import sys
 
 import h3
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
+
+# Ensure the project root is first on sys.path for local package imports.
+_ROOT_DIR = Path(__file__).resolve().parent
+if str(_ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(_ROOT_DIR))
+_core_mod = sys.modules.get("core")
+if _core_mod is not None:
+    _core_file = getattr(_core_mod, "__file__", None)
+    _core_paths = getattr(_core_mod, "__path__", None)
+    _core_is_local = False
+    if _core_file:
+        _core_is_local = str(Path(_core_file).resolve()).startswith(str(_ROOT_DIR))
+    elif _core_paths:
+        _core_is_local = any(
+            str(Path(p).resolve()).startswith(str(_ROOT_DIR)) for p in _core_paths
+        )
+    if not _core_is_local:
+        sys.modules.pop("core", None)
 
 # ---- interne modules ----
 from core.config import (
@@ -47,7 +66,7 @@ from core.map_data import (
     extract_selected_hex_from_payload,
 )
 from core.io import load_geojson, load_data, resolve_wegennet_path
-from core.report import build_report_pdf
+from core.report import build_report_pdf, prepare_report_image_bytes
 from ui.sidebar import build_sidebar
 from ui.kpis_and_tables import render_kpis, render_tabs
 
@@ -1143,6 +1162,12 @@ if st.session_state.show_map:
         with st.spinner("PDF rapport genereren..."):
             _cleanup_report_file()
             st.session_state["report_pdf"] = None
+            map_image = prepare_report_image_bytes(
+                st.session_state.get("report_map_image"),
+                dpi=ui.get("report_dpi"),
+            )
+            if map_image is not None:
+                st.session_state["report_map_image"] = map_image
             st.session_state["report_pdf_path"] = build_report_pdf(
                 df_filtered,
                 ui=ui,
@@ -1151,7 +1176,7 @@ if st.session_state.show_map:
                 warmtenet_gjson=gjson_warmtenet,
                 heat_unit=heat_unit,
                 threshold_display=threshold_display,
-                map_image=st.session_state.get("report_map_image"),
+                map_image=map_image,
             )
             st.session_state["report_filename"] = (
                 f"FRL_WarmteAtlas_{timestamp}.pdf"
