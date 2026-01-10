@@ -1,7 +1,9 @@
 # core/report.py
 from __future__ import annotations
 
+import gc
 import io
+import tempfile
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -124,6 +126,15 @@ def _apply_report_style(plt) -> None:
             "axes.edgecolor": _STIJL["grid_color"],
         }
     )
+
+
+def _close_figure(fig, plt) -> None:
+    try:
+        fig.clear()
+    except Exception:
+        pass
+    plt.close(fig)
+    gc.collect()
 
 
 def _fmt_int(value: Any) -> str:
@@ -1673,9 +1684,15 @@ def build_report_pdf(
     threshold_display: float | None = None,
     map_image: bytes | None = None,
     report_title: str = "Friese Warmteatlas",
-) -> bytes:
+) -> str:
     plt, PdfPages = _lazy_matplotlib()
-    buffer = io.BytesIO()
+    tmp_file = tempfile.NamedTemporaryFile(
+        prefix="warmteatlas_",
+        suffix=".pdf",
+        delete=False,
+    )
+    tmp_path = Path(tmp_file.name)
+    tmp_file.close()
     now = datetime.now()
     heat_unit = heat_unit or ui.get("heat_unit") or "MWh/ha"
     unit_display = _normalize_unit(heat_unit)
@@ -1804,14 +1821,14 @@ def build_report_pdf(
             warmtenet_wp=ui.get("warmtenet_wp_selectie"),
             wegennet_wp=ui.get("wegennet_wp_selectie"),
         )
-    with PdfPages(buffer) as pdf:
+    with PdfPages(tmp_path) as pdf:
         if _VOORBLAD_ACHTERGROND.exists():
             fig = _render_cover_page(
                 report_title, month_year=cover_date, background=_VOORBLAD_ACHTERGROND
             )
             page_num += 1
             pdf.savefig(fig, dpi=dpi)
-            plt.close(fig)
+            _close_figure(fig, plt)
 
         if _SAMENVATTING_ACHTERGROND.exists():
             fig = _render_summary_page(
@@ -1822,19 +1839,19 @@ def build_report_pdf(
             page_num += 1
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
-            plt.close(fig)
+            _close_figure(fig, plt)
         else:
             fig = _render_sections_page(report_title, sections)
             page_num += 1
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
-            plt.close(fig)
+            _close_figure(fig, plt)
             if map_image:
                 fig = _render_image_page("Kaart", map_image)
                 page_num += 1
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
-                plt.close(fig)
+                _close_figure(fig, plt)
 
         top_wp = _build_top_woonplaatsen_table(df_filtered)
         max_row_height = _TABEL_RIJ_HOOGTE if _WOONPLAATSEN_ACHTERGROND.exists() else None
@@ -1859,7 +1876,7 @@ def build_report_pdf(
             page_num += 1
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
-            plt.close(fig)
+            _close_figure(fig, plt)
         else:
             if table_bbox and max_row_height:
                 header_rows = 1 if show_header else 0
@@ -1885,7 +1902,7 @@ def build_report_pdf(
                 page_num += 1
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
-                plt.close(fig)
+                _close_figure(fig, plt)
 
         if show_warmtenet_pages:
             warmtenet_font_base = max(_TABEL_LETTERGROOTTE - 2, 7)
@@ -1979,7 +1996,7 @@ def build_report_pdf(
                     page_num += 1
                     _add_page_number(fig, page_num)
                     pdf.savefig(fig, dpi=dpi)
-                    plt.close(fig)
+                    _close_figure(fig, plt)
                     return
 
                 max_row_height = _row_height_for_font(table_font_size)
@@ -2036,7 +2053,7 @@ def build_report_pdf(
                         page_num += 1
                         _add_page_number(fig, page_num)
                         pdf.savefig(fig, dpi=dpi)
-                        plt.close(fig)
+                        _close_figure(fig, plt)
                     return
                 if group_by_woonplaats and "Woonplaats" in df.columns:
                     grouped = [
@@ -2082,7 +2099,7 @@ def build_report_pdf(
                         page_num += 1
                         _add_page_number(fig, page_num)
                         pdf.savefig(fig, dpi=dpi)
-                        plt.close(fig)
+                        _close_figure(fig, plt)
                         fig, ax, caption_height = _start_warmtenet_fig(
                             background, show_title, title, caption_lines
                         )
@@ -2121,7 +2138,7 @@ def build_report_pdf(
                 page_num += 1
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
-                plt.close(fig)
+                _close_figure(fig, plt)
 
             warmte_df = panden_df = kosten_df = None
             if warmtenet_tables:
@@ -2172,7 +2189,7 @@ def build_report_pdf(
             page_num += 1
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
-            plt.close(fig)
+            _close_figure(fig, plt)
 
         overlay_images = []
         if extraqt_row is not None and _EXTRAQT_LOGO_PAD.exists():
@@ -2205,6 +2222,6 @@ def build_report_pdf(
         page_num += 1
         _add_page_number(fig, page_num)
         pdf.savefig(fig, dpi=dpi)
-        plt.close(fig)
+        _close_figure(fig, plt)
 
-    return buffer.getvalue()
+    return str(tmp_path)

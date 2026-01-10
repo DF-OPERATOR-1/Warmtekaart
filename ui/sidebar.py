@@ -502,7 +502,7 @@ def build_sidebar(
                 default_show_lines = bool(
                     st.session_state.get("warmtenet_show_lines", True)
                 )
-                st.markdown("**Onderdelen warmtenetlaag**")
+                st.markdown("**Onderdelen warmtebronnen**")
                 show_sources = st.checkbox(
                     "Bronnen",
                     value=default_show_sources,
@@ -606,7 +606,7 @@ def build_sidebar(
                 ui["warmtenet_selected_keys"] = selected_keys
                 st.session_state["warmtenet_selected_keys"] = selected_keys
                 ui["warmtenet_opacity"] = st.slider(
-                    "Transparantie warmtebron laag",
+                    "Transparantie warmtenet uit warmtebron",
                     min_value=0.1,
                     max_value=1.0,
                     value=float(
@@ -683,7 +683,7 @@ def build_sidebar(
             if show_wegennet:
                 zoom_level = int(ui.get("zoom_level", 0))
                 min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
-                st.markdown("**Onderdelen wegennetlaag**")
+                st.markdown("**Onderdelen warmtevraag**")
                 if zoom_level < min_zoom:
                     st.info(
                         f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}."
@@ -785,7 +785,7 @@ def build_sidebar(
                         ui["wegennet_type_selectie"] = type_selectie
 
                         ui["wegennet_opacity"] = st.slider(
-                            "Transparantie wegennet",
+                            "Transparantie warmtenet uit warmtevraag",
                             min_value=0.1,
                             max_value=1.0,
                             value=float(
@@ -854,9 +854,9 @@ def build_sidebar(
             ui["show_water_potentie"] = show_water_pot
             if auto_blocked_water_pot or water_pot_blocked:
                 st.warning(
-                    "De wegennetlaag van gemeente Leeuwarden is te zwaar om tegelijk "
-                    "te gebruiken met de waterpotentielaag. Schakel de wegennetlaag "
-                    "uit om deze laag te gebruiken."
+                    "Het warmtenet op basis van de warmtevraag van gemeente Leeuwarden "
+                    "is te zwaar om tegelijk met de waterpotentielaag te gebruiken. "
+                    "Schakel het warmtenet uit om de waterpotentielaag te tonen."
                 )
             default_water_opacity = pot_meta.get("water_potentie", {}).get(
                 "default_opacity", 0.7
