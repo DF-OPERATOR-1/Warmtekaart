@@ -1264,48 +1264,39 @@ if should_compute:
                 )
             st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):
-        layer_state = {
-            "energiearmoede": show_energiearmoede,
-            "koopwoningen": show_koopwoningen,
-            "wooncorporatie": show_corporatie,
-            "water_potentie": show_water_potentie,
-            "buurt_potentie": show_buurt_potentie,
-            "warmtenet": show_warmtenet,
-            "wegennet": bool(ui.get("show_wegennet")),
-            "sites_layer": bool(ui.get("show_sites_layer")),
-            "warmtenet_parts": {
-                "bronnen": bool(ui.get("warmtenet_show_sources")),
-                "objecten": bool(ui.get("warmtenet_show_objects")),
-                "leidingen": bool(ui.get("warmtenet_show_lines")),
-            },
-        }
-        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-        with report_status_slot.container():
-            with st.spinner("PDF rapport genereren..."):
-                _cleanup_report_file()
-                st.session_state["report_pdf"] = None
-                map_image = prepare_report_image_bytes(
-                    st.session_state.get("report_map_image"),
-                    dpi=ui.get("report_dpi"),
-                )
-                if map_image is not None:
-                    st.session_state["report_map_image"] = map_image
-                try:
-                    st.session_state["report_pdf_path"] = build_report_pdf(
-                        df_filtered,
-                        ui=ui,
-                        layer_state=layer_state,
-                        sites_costed=st.session_state.get("sites_costed"),
-                        warmtenet_gjson=gjson_warmtenet,
-                        heat_unit=heat_unit,
-                        threshold_display=threshold_display,
-                        map_image=map_image,
+        if bool(ui.get("show_warmtenet_model")) and bool(ui.get("show_wegennet")):
+            st.session_state["report_map_image_error"] = (
+                "PDF voor potentiële warmtenetten is tijdelijk uitgeschakeld."
+            )
+            st.session_state["report_requested"] = False
+            st.session_state["report_image_uploaded"] = False
+        else:
+            layer_state = {
+                "energiearmoede": show_energiearmoede,
+                "koopwoningen": show_koopwoningen,
+                "wooncorporatie": show_corporatie,
+                "water_potentie": show_water_potentie,
+                "buurt_potentie": show_buurt_potentie,
+                "warmtenet": show_warmtenet,
+                "wegennet": bool(ui.get("show_wegennet")),
+                "sites_layer": bool(ui.get("show_sites_layer")),
+                "warmtenet_parts": {
+                    "bronnen": bool(ui.get("warmtenet_show_sources")),
+                    "objecten": bool(ui.get("warmtenet_show_objects")),
+                    "leidingen": bool(ui.get("warmtenet_show_lines")),
+                },
+            }
+            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
+            with report_status_slot.container():
+                with st.spinner("PDF rapport genereren..."):
+                    _cleanup_report_file()
+                    st.session_state["report_pdf"] = None
+                    map_image = prepare_report_image_bytes(
+                        st.session_state.get("report_map_image"),
+                        dpi=ui.get("report_dpi"),
                     )
-                    st.session_state["report_filename"] = (
-                        f"FRL_WarmteAtlas_{timestamp}.pdf"
-                    )
-                    st.session_state["report_map_image_error"] = None
-                except Exception:
+                    if map_image is not None:
+                        st.session_state["report_map_image"] = map_image
                     try:
                         st.session_state["report_pdf_path"] = build_report_pdf(
                             df_filtered,
@@ -1315,30 +1306,46 @@ if should_compute:
                             warmtenet_gjson=gjson_warmtenet,
                             heat_unit=heat_unit,
                             threshold_display=threshold_display,
-                            map_image=None,
+                            map_image=map_image,
                         )
                         st.session_state["report_filename"] = (
                             f"FRL_WarmteAtlas_{timestamp}.pdf"
                         )
-                        st.session_state["report_map_image_error"] = (
-                            "De kaartafbeelding kon niet worden gebruikt. "
-                            "PDF is zonder afbeelding gemaakt."
-                        )
+                        st.session_state["report_map_image_error"] = None
                     except Exception:
-                        st.session_state["report_pdf_path"] = None
-                        st.session_state["report_filename"] = None
-                        st.session_state["report_map_image_error"] = (
-                            "PDF maken is mislukt. Probeer het opnieuw."
-                        )
-                report_path = st.session_state.get("report_pdf_path")
-                if report_path and Path(report_path).exists():
-                    try:
-                        st.session_state["report_pdf"] = Path(report_path).read_bytes()
-                    except Exception:
-                        st.session_state["report_pdf"] = None
-        report_status_slot.empty()
-        st.session_state["report_requested"] = False
-        st.session_state["report_image_uploaded"] = False
+                        try:
+                            st.session_state["report_pdf_path"] = build_report_pdf(
+                                df_filtered,
+                                ui=ui,
+                                layer_state=layer_state,
+                                sites_costed=st.session_state.get("sites_costed"),
+                                warmtenet_gjson=gjson_warmtenet,
+                                heat_unit=heat_unit,
+                                threshold_display=threshold_display,
+                                map_image=None,
+                            )
+                            st.session_state["report_filename"] = (
+                                f"FRL_WarmteAtlas_{timestamp}.pdf"
+                            )
+                            st.session_state["report_map_image_error"] = (
+                                "De kaartafbeelding kon niet worden gebruikt. "
+                                "PDF is zonder afbeelding gemaakt."
+                            )
+                        except Exception:
+                            st.session_state["report_pdf_path"] = None
+                            st.session_state["report_filename"] = None
+                            st.session_state["report_map_image_error"] = (
+                                "PDF maken is mislukt. Probeer het opnieuw."
+                            )
+                    report_path = st.session_state.get("report_pdf_path")
+                    if report_path and Path(report_path).exists():
+                        try:
+                            st.session_state["report_pdf"] = Path(report_path).read_bytes()
+                        except Exception:
+                            st.session_state["report_pdf"] = None
+            report_status_slot.empty()
+            st.session_state["report_requested"] = False
+            st.session_state["report_image_uploaded"] = False
     if report_slot is not None:
         report_pdf = st.session_state.get("report_pdf")
         report_path = st.session_state.get("report_pdf_path")
@@ -1346,6 +1353,12 @@ if should_compute:
             st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
         )
         with report_slot:
+            if bool(ui.get("show_warmtenet_model")) and bool(ui.get("show_wegennet")):
+                st.warning(
+                    "Het maken van een PDF-rapport met potentiële warmtenetten is tijdelijk uitgeschakeld. "
+                    "Schakel één van de twee lagen uit om een PDF te maken. "
+                    "Deze functie is weer beschikbaar na de update van de warmtenetten."
+                )
             if report_pdf:
                 st.download_button(
                     "Download PDF rapport",
@@ -1364,7 +1377,13 @@ if should_compute:
                 if st.session_state.get("_map_changed"):
                     st.button("Maak kaart", on_click=_handle_make_map_click)
                 else:
-                    st.button("Maak PDF rapport", on_click=_request_report)
+                    st.button(
+                        "Maak PDF rapport",
+                        on_click=_request_report,
+                        disabled=bool(
+                            ui.get("show_warmtenet_model") and ui.get("show_wegennet")
+                        ),
+                    )
 
 else:
     with map_container:
@@ -1389,6 +1408,12 @@ else:
             st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
         )
         with report_slot:
+            if bool(ui.get("show_warmtenet_model")) and bool(ui.get("show_wegennet")):
+                st.warning(
+                    "PDF voor potentiële warmtenetten is tijdelijk uitgeschakeld. "
+                    "Schakel een van de twee lagen uit om een PDF te maken. "
+                    "Beschikbaar na update van de warmtenetten."
+                )
             if report_pdf:
                 st.download_button(
                     "Download PDF rapport",
@@ -1407,4 +1432,10 @@ else:
                 if st.session_state.get("_map_changed"):
                     st.button("Maak kaart", on_click=_handle_make_map_click)
                 else:
-                    st.button("Maak PDF rapport", on_click=_request_report)
+                    st.button(
+                        "Maak PDF rapport",
+                        on_click=_request_report,
+                        disabled=bool(
+                            ui.get("show_warmtenet_model") and ui.get("show_wegennet")
+                        ),
+                    )
