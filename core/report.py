@@ -1933,17 +1933,15 @@ def build_report_pdf(
     ]
 
     page_num = 0
-    show_warmtenet_pages = bool(
-        layer_state.get("warmtenet") and layer_state.get("wegennet")
-    )
     warmtenet_tables = None
-    if show_warmtenet_pages:
+    if layer_state.get("warmtenet") and layer_state.get("wegennet"):
         warmtenet_tables = _build_warmtenet_report_tables(
             warmtenet_gjson=warmtenet_gjson,
             df_filtered=df_filtered,
             warmtenet_wp=ui.get("warmtenet_wp_selectie"),
             wegennet_wp=ui.get("wegennet_wp_selectie"),
         )
+    show_warmtenet_pages = bool(warmtenet_tables)
     with PdfPages(tmp_path) as pdf:
         if _VOORBLAD_ACHTERGROND.exists():
             fig = _render_cover_page(
