@@ -1410,9 +1410,9 @@ else:
         with report_slot:
             if bool(ui.get("show_warmtenet_model")) and bool(ui.get("show_wegennet")):
                 st.warning(
-                    "PDF voor potentiële warmtenetten is tijdelijk uitgeschakeld. "
-                    "Schakel een van de twee lagen uit om een PDF te maken. "
-                    "Beschikbaar na update van de warmtenetten."
+                    "Het maken van een PDF-rapport met potentiële warmtenetten is tijdelijk uitgeschakeld. "
+                    "Schakel één van de twee lagen uit om een PDF te kunnen maken. "
+                    "Deze functie is weer beschikbaar na de update van de warmtenetten."
                 )
             if report_pdf:
                 st.download_button(
