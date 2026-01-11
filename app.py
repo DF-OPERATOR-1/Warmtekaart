@@ -139,6 +139,7 @@ st.markdown(
 kpi_container = st.container()
 map_container = st.container()
 tables_container = st.container()
+report_status_slot = kpi_container.empty()
 
 # ========== GeoJSON / CSV laden ==========
 _gj_common_props = ["buurtnaam", "gemeentenaam"]
@@ -294,6 +295,9 @@ st.session_state.setdefault("report_map_image", None)
 st.session_state.setdefault("report_map_image_name", None)
 st.session_state.setdefault("report_map_image_error", None)
 st.session_state.setdefault("report_upload_key", 0)
+st.session_state.setdefault("report_image_uploaded", False)
+st.session_state.setdefault("report_map_image_sig", None)
+st.session_state.setdefault("map_raw_cache", None)
 
 st.session_state.setdefault("first_hint_shown", False)
 
@@ -345,10 +349,25 @@ def _cleanup_report_file() -> None:
     st.session_state["report_pdf_path"] = None
 
 
+def _clear_report_state(*, clear_map_image: bool = True) -> None:
+    """Verwijder rapport-uitvoer uit session_state en eventuele temp-bestanden."""
+    _cleanup_report_file()
+    st.session_state["report_pdf"] = None
+    st.session_state["report_filename"] = None
+    st.session_state["report_requested"] = False
+    st.session_state["report_map_image_error"] = None
+    st.session_state["report_image_uploaded"] = False
+    if clear_map_image:
+        st.session_state["report_map_image"] = None
+        st.session_state["report_map_image_name"] = None
+        st.session_state["report_map_image_sig"] = None
+        st.session_state["report_upload_key"] = (
+            int(st.session_state.get("report_upload_key", 0)) + 1
+        )
+
+
 def _request_report() -> None:
     st.session_state["report_requested"] = True
-    st.session_state["show_map"] = True
-    st.session_state["_map_changed"] = False
 
 
 # ===== Filters-snapshot =====
@@ -424,6 +443,83 @@ def _build_filters_snapshot(ui: dict) -> dict:
     }
 
 
+def _build_report_filters_snapshot(ui: dict) -> dict:
+    """Snapshot met extra report-relevante filters (zonder map-trigger gedrag)."""
+    L = st.session_state.get("LAYER_CFG", LAYER_CFG)
+    snap = _build_filters_snapshot(ui).copy()
+    snap.update(
+        {
+            L["warmtenet_model"]["toggle_key"]: bool(
+                st.session_state.get(L["warmtenet_model"]["toggle_key"], False)
+            ),
+            L["wegennet"]["toggle_key"]: bool(
+                st.session_state.get(L["wegennet"]["toggle_key"], False)
+            ),
+            "warmtenet_show_sources": bool(
+                ui.get(
+                    "warmtenet_show_sources",
+                    st.session_state.get("warmtenet_show_sources", True),
+                )
+            ),
+            "warmtenet_show_objects": bool(
+                ui.get(
+                    "warmtenet_show_objects",
+                    st.session_state.get("warmtenet_show_objects", True),
+                )
+            ),
+            "warmtenet_show_lines": bool(
+                ui.get(
+                    "warmtenet_show_lines",
+                    st.session_state.get("warmtenet_show_lines", True),
+                )
+            ),
+            "warmtenet_wp_selectie": _as_sorted_list(
+                ui.get(
+                    "warmtenet_wp_selectie",
+                    st.session_state.get("warmtenet_wp_selectie", []),
+                )
+            ),
+            "warmtenet_type_selectie": _as_sorted_list(
+                ui.get(
+                    "warmtenet_type_selectie",
+                    st.session_state.get("warmtenet_type_selectie", []),
+                )
+            ),
+            "warmtenet_selected_keys": _as_sorted_list(
+                ui.get(
+                    "warmtenet_selected_keys",
+                    st.session_state.get("warmtenet_selected_keys", []),
+                )
+            ),
+            "warmtenet_opacity": _as_float(
+                ui.get(
+                    "warmtenet_opacity",
+                    st.session_state.get("warmtenet_opacity", 0.85),
+                )
+            ),
+            "wegennet_wp_selectie": _as_sorted_list(
+                ui.get(
+                    "wegennet_wp_selectie",
+                    st.session_state.get("wegennet_wp_selectie", []),
+                )
+            ),
+            "wegennet_type_selectie": _as_sorted_list(
+                ui.get(
+                    "wegennet_type_selectie",
+                    st.session_state.get("wegennet_type_selectie", []),
+                )
+            ),
+            "wegennet_opacity": _as_float(
+                ui.get(
+                    "wegennet_opacity",
+                    st.session_state.get("wegennet_opacity", 0.8),
+                )
+            ),
+        }
+    )
+    return snap
+
+
 def _filters_without_zoom(ui: dict) -> dict:
     """Snapshot zonder zoomvelden, handig voor UI-vergelijkingen."""
     snap = _build_filters_snapshot(ui).copy()
@@ -440,23 +536,22 @@ def _changed_filter_keys(prev: dict, curr: dict) -> set[str]:
 
 if "prev_filters" not in st.session_state:
     st.session_state.prev_filters = _build_filters_snapshot(ui)
+if "prev_report_filters" not in st.session_state:
+    st.session_state.prev_report_filters = _build_report_filters_snapshot(ui)
 
 current_filters = _build_filters_snapshot(ui)
+current_report_filters = _build_report_filters_snapshot(ui)
 filters_changed = current_filters != st.session_state.prev_filters
+report_filters_changed = (
+    current_report_filters != st.session_state.prev_report_filters
+)
 
 if filters_changed:
     changed_keys = _changed_filter_keys(st.session_state.prev_filters, current_filters)
     st.session_state.prev_filters = current_filters
-    _cleanup_report_file()
-    st.session_state["report_pdf"] = None
-    st.session_state["report_filename"] = None
-    st.session_state["report_requested"] = False
-    st.session_state["report_map_image"] = None
-    st.session_state["report_map_image_name"] = None
-    st.session_state["report_map_image_error"] = None
-    st.session_state["report_upload_key"] = (
-        int(st.session_state.get("report_upload_key", 0)) + 1
-    )
+    st.session_state.prev_report_filters = current_report_filters
+    _clear_report_state(clear_map_image=True)
+    st.session_state["map_raw_cache"] = None
     woonplaats_only_change = bool(changed_keys) and changed_keys.issubset(
         {"woonplaats"}
     )
@@ -479,6 +574,10 @@ if filters_changed:
         st.session_state["sites_ready"] = False
 else:
     st.session_state["_map_changed"] = False
+    if report_filters_changed:
+        st.session_state.prev_report_filters = current_report_filters
+        _clear_report_state(clear_map_image=True)
+        st.session_state["map_raw_cache"] = None
 
 if map_button_clicked:
     st.session_state.show_map = True
@@ -490,7 +589,8 @@ if st.session_state.get("report_requested"):
 
 
 # ========== Hoofdscherm ==========
-if st.session_state.show_map:
+should_compute = st.session_state.show_map or st.session_state.get("report_requested")
+if should_compute:
     res = int(ui["resolution"])
     zoom_level = int(ui.get("zoom_level", 0))
     heat_unit = str(ui.get("heat_unit", "kWh/m²"))
@@ -503,9 +603,24 @@ if st.session_state.show_map:
     )
     value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
 
-    df_filtered, df_extra_info, df_view_source = build_map_dataframe(
-        df_filtered_input, res, log_fn=_log_ram
+    map_raw_cache = st.session_state.get("map_raw_cache") or {}
+    use_cached_raw = bool(st.session_state.get("report_image_uploaded")) and (
+        map_raw_cache.get("filters") == current_filters
     )
+    if use_cached_raw:
+        df_filtered = map_raw_cache["df_filtered"].copy()
+        df_extra_info = map_raw_cache["df_extra_info"].copy()
+        df_view_source = map_raw_cache["df_view_source"].copy()
+    else:
+        df_filtered, df_extra_info, df_view_source = build_map_dataframe(
+            df_filtered_input, res, log_fn=_log_ram
+        )
+        st.session_state["map_raw_cache"] = {
+            "filters": current_filters.copy(),
+            "df_filtered": df_filtered.copy(),
+            "df_extra_info": df_extra_info.copy(),
+            "df_view_source": df_view_source.copy(),
+        }
 
     # afronden
     df_filtered["kWh_per_m2"] = df_filtered["kWh_per_m2"].round(0)
@@ -788,360 +903,366 @@ if st.session_state.show_map:
     if not st.session_state.get("sites_ready"):
         sites_records = []
 
-    # ========== Kaartlagen ==========
-    geojson_dict = {
-        "energiearmoede": gjson_energiearmoede,
-        "koopwoningen": gjson_koopwoningen,
-        "corporatie": gjson_corporatie,
-        "water_potentie": gjson_water_potentie,
-        "buurt_potentie": gjson_buurt_potentie,
-        "warmtenet": gjson_warmtenet,
-    }
-
-    extra_layers = []
-    if any(
-        [
-            st.session_state.get(LAYER_CFG["energiearmoede"]["toggle_key"]),
-            st.session_state.get(LAYER_CFG["koopwoningen"]["toggle_key"]),
-            st.session_state.get(LAYER_CFG["wooncorporatie"]["toggle_key"]),
-            st.session_state.get(LAYER_CFG["water_potentie"]["toggle_key"]),
-            st.session_state.get(LAYER_CFG["buurt_potentie"]["toggle_key"]),
-        ]
-    ):
-        extra_layers = create_extra_layers(
-            geojson_dict,
-            ui["woonplaats_selectie"],
-            ui["zoom_level"],
-            ui["extra_opacity"],
-            potential_meta,
-        )
-
-    warmtenet_layers: list[pdk.Layer] = []
-    if ui.get("show_warmtenet_model") and gjson_warmtenet:
-        warmtenet_layers = create_warmtenet_layers(
-            gjson_warmtenet,
-            ui.get("warmtenet_wp_selectie", ui.get("woonplaats_selectie", [])),
-            (warmtenet_meta or {}).get("color_map", {}),
-            ui.get("warmtenet_selected_keys", []),
-            (warmtenet_meta or {}).get("type_by_key", {}),
-            ui.get("warmtenet_type_selectie", []),
-            opacity=float(
-                ui.get(
-                    "warmtenet_opacity",
-                    (warmtenet_meta or {}).get("default_opacity", 0.85),
-                )
-            ),
-            show_lines=bool(ui.get("warmtenet_show_lines", True)),
-            show_sources=bool(ui.get("warmtenet_show_sources", True)),
-            show_objects=bool(ui.get("warmtenet_show_objects", True)),
-        )
-
-    wegennet_layers: list[pdk.Layer] = []
-    wegennet_wp = ui.get("wegennet_wp_selectie", [])
-    wegennet_cfg = LAYER_CFG.get("wegennet", {})
-    min_zoom = int(wegennet_cfg.get("min_zoom", 11))
-    gemeente_sel = st.session_state.get("gemeente_selectie", [])
-    if (
-        ui.get("show_wegennet")
-        and wegennet_wp
-        and int(ui.get("zoom_level", 0)) >= min_zoom
-        and len(gemeente_sel) == 1
-    ):
-        wegennet_path = resolve_wegennet_path(gemeente_sel[0])
-        coord_precision = int(wegennet_cfg.get("coord_precision", 4))
-        gjson_wegennet = load_geojson(
-            wegennet_path,
-            keep_props=[
-                "type",
-                "length_m",
-                "area_name",
-            ],
-            coord_precision=coord_precision,
-        )
-        gjson_wegennet = convert_geojson_to_wgs84_if_needed(gjson_wegennet)
-        wegennet_layers = create_wegennet_layers(
-            gjson_wegennet,
-            wegennet_wp,
-            ui.get("wegennet_type_selectie", []),
-            opacity=float(
-                ui.get(
-                    "wegennet_opacity",
-                    (wegennet_meta or {}).get("default_opacity", 0.8),
-                )
-            ),
-            zoom_level=int(ui.get("zoom_level", 0)),
-        )
-
-    # H3 hoofdlaag(en) per zoom
-    base_hex_cols = [
-        "h3_index",
-        "color",
-        "scaled_elevation",
-        "woonplaats",
-        "aantal_huizen",
-        "aantal_VBOs",
-        "MWh_per_ha_r",
-        "gemiddeld_jaarverbruik_mWh_r",
-        "MWh_per_pand_r",
-        "area_ha_r",
-        "area_m2",
-        "kWh_per_m2",
-        "totale_oppervlakte",
-        "bouwjaar",
-    ]
-    df_hex_view = df_filtered.loc[:, base_hex_cols].copy()
-    df_hex_view["geo_extra_rows"] = ""
-    df_hex_view["gemeente_row_display"] = "block"
-    df_hex_view["buurt_row_display"] = "block"
-
-    def _fmt0_val(series):
-        return series.astype("int64").map(lambda v: format_dutch_number(int(v), 0))
-
-    def _fmt2_val(series):
-        return series.astype("float32").map(lambda v: format_dutch_number(float(v), 2))
-
-    def _fmt4_val(series):
-        return series.astype("float32").map(lambda v: format_dutch_number(float(v), 4))
-
-    df_hex_view["aantal_huizen_fmt"] = _fmt0_val(df_hex_view["aantal_huizen"])
-    df_hex_view["aantal_VBOs_fmt"] = _fmt0_val(df_hex_view["aantal_VBOs"])
-    df_hex_view["MWh_per_ha_r_fmt"] = _fmt2_val(df_hex_view["MWh_per_ha_r"])
-    df_hex_view["gemiddeld_jaarverbruik_mWh_r_fmt"] = _fmt0_val(
-        df_hex_view["gemiddeld_jaarverbruik_mWh_r"]
-    )
-    df_hex_view["MWh_per_pand_fmt"] = _fmt2_val(df_hex_view["MWh_per_pand_r"])
-    df_hex_view["area_ha_r_fmt"] = _fmt4_val(df_hex_view["area_ha_r"])
-    df_hex_view["area_m2_fmt"] = _fmt0_val(
-        df_hex_view["area_m2"].round().astype("int64")
-    )
-    df_hex_view["kWh_per_m2_fmt"] = _fmt0_val(df_hex_view["kWh_per_m2"])
-    df_hex_view["totale_oppervlakte_fmt"] = _fmt0_val(df_hex_view["totale_oppervlakte"])
-    df_hex_view["bouwjaar_fmt"] = (
-        df_hex_view["bouwjaar"].astype("int64").map(lambda v: str(int(v)))
-    )
-
-    df_hex_view["hex_section_display"] = "block"
-    df_hex_view["site_section_display"] = "none"
-    df_hex_view["geo_section_display"] = "none"
-
-    cols_for_hex = [
-        "h3_index",
-        "color",
-        "scaled_elevation",
-        "woonplaats",
-        "aantal_huizen",
-        "aantal_VBOs",
-        "MWh_per_ha_r",
-        "MWh_per_pand_r",
-        "gemiddeld_jaarverbruik_mWh_r",
-        "area_ha_r",
-        "kWh_per_m2",
-        "totale_oppervlakte",
-        "bouwjaar",
-        "aantal_huizen_fmt",
-        "aantal_VBOs_fmt",
-        "MWh_per_ha_r_fmt",
-        "MWh_per_pand_fmt",
-        "gemiddeld_jaarverbruik_mWh_r_fmt",
-        "area_ha_r_fmt",
-        "area_m2_fmt",
-        "kWh_per_m2_fmt",
-        "totale_oppervlakte_fmt",
-        "bouwjaar_fmt",
-        "hex_section_display",
-        "site_section_display",
-        "geo_section_display",
-        "geo_extra_rows",
-        "gemeente_row_display",
-        "buurt_row_display",
-    ]
-    df_hex_view = df_hex_view.loc[:, cols_for_hex]
-    indic_value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
-    indic_mask = df_filtered[indic_value_col] > threshold_display
-    df_indicative = df_hex_view.loc[indic_mask, :]
-    _log_ram("before_pydeck_layers")
-    warmte_opacity = float(
-        ui.get("warmte_hex_opacity", st.session_state.get("warmte_hex_opacity", 0.6))
-    )
-    layers = create_layers_by_zoom(
-        df_hex_view,
-        ui["show_main_layer"],
-        ui["extruded"],
-        ui["zoom_level"],
-        warmte_opacity,
-    )
-
-    site_layers = []
-    if allow_sites and sites_records:
-        sites_costed_records = (
-            st.session_state.sites_costed
-            if st.session_state.get("sites_ready")
-            else None
-        )
-        site_layers = create_site_layers(
-            sites_records,
-            sites_costed_records,
-            site_hex_opacity=float(
-                ui.get(
-                    "sites_hex_opacity", st.session_state.get("sites_hex_opacity", 0.85)
-                )
-            ),
-        )
-
-    # Indicatieve aandachtslaag
-    if ui["show_indicative_layer"] and not df_indicative.empty:
-        layers.append(
-            create_indicative_area_layer(
-                df_indicative, ui["extruded"], ui["zoom_level"], warmte_opacity
-            )
-        )
-
-    # Basemap
-    hide_bg = bool(ui.get("hide_basemap"))
-    basemap_style = ui.get("basemap_style", ui.get("map_style"))
-    base_layers = build_base_layers(basemap_style, hide_bg)
-
-    # Volgorde: basemap -> woonlagen -> H3/indicatief/sites
-    all_layers = (
-        base_layers
-        + extra_layers
-        + layers
-        + wegennet_layers
-        + warmtenet_layers
-        + site_layers
-    )
-
-    # ========== ViewState ==========
-    def _view_for_selection(df_full, woonplaatsen_geselecteerd):
-        """Bepaal kaartcentrum en zoom op basis van de huidige selectie."""
-        manual_hex_current = st.session_state.get("manual_site_h3")
-        if current_sites_mode == "manual" and manual_hex_current:
-            lat_manual, lon_manual = h3.cell_to_latlng(manual_hex_current)
-            return lat_manual, lon_manual, 13.0
-        friesland_center = (53.125, 5.75)
-        friesland_zoom = 8
-        min_zoom, max_zoom = 8, 13.0
-        if not woonplaatsen_geselecteerd:
-            return friesland_center[0], friesland_center[1], friesland_zoom
-        df_sel = df_full[df_full["woonplaats"].isin(woonplaatsen_geselecteerd)]
-        if df_sel.empty:
-            return friesland_center[0], friesland_center[1], friesland_zoom
-        lat_center = float(df_sel["latitude"].mean())
-        lon_center = float(df_sel["longitude"].mean())
-        if len(woonplaatsen_geselecteerd) == 1:
-            return lat_center, lon_center, 13.0
-        lat_min = float(df_sel["latitude"].min())
-        lat_max = float(df_sel["latitude"].max())
-        lon_min = float(df_sel["longitude"].min())
-        lon_max = float(df_sel["longitude"].max())
-        lat_span = max(0.0001, lat_max - lat_min)
-        lon_span = max(0.0001, lon_max - lon_min)
-        span = max(lat_span, lon_span)
-        if span > 2.0:
-            zoom = 8.0
-        elif span > 1.0:
-            zoom = 8.0
-        elif span > 0.5:
-            zoom = 9.0
-        elif span > 0.25:
-            zoom = 9.5
-        elif span > 0.12:
-            zoom = 10.0
-        elif span > 0.06:
-            zoom = 11.0
-        elif span > 0.03:
-            zoom = 12.0
-        else:
-            zoom = 13.0
-        zoom = max(min_zoom, min(max_zoom, zoom))
-        return lat_center, lon_center, zoom
-
-    lat, lon, zoom = _view_for_selection(df_view_source, ui["woonplaats_selectie"])
-    st.session_state.view_state = pdk.ViewState(
-        longitude=lon,
-        latitude=lat,
-        zoom=zoom,
-        min_zoom=7.5,
-        max_zoom=16,
-        pitch=0,
-        bearing=0,
-    )
-
-    # ========== KPI ==========
-    with kpi_container:
-        render_kpis(
-            df_filtered,
-            st.session_state.participatie,
-            include_participation=False,
-        )
-
-    # ========== Kaart render + cleanup ==========
-    deck_kwargs = {"map_style": ui.get("map_style")}
-
-    with map_container:
-        deck = pdk.Deck(
-            layers=all_layers,
-            initial_view_state=st.session_state.view_state,
-            tooltip=build_deck_tooltip(),
-            **deck_kwargs,
-        )
-
-        manual_selection_active = show_sites_layer and manual_mode
-        chart_key = "main_map_deck_chart"
-        chart_kwargs = {
-            "width": "stretch",
-            "key": chart_key,
+    if st.session_state.show_map:
+        # ========== Kaartlagen ==========
+        geojson_dict = {
+            "energiearmoede": gjson_energiearmoede,
+            "koopwoningen": gjson_koopwoningen,
+            "corporatie": gjson_corporatie,
+            "water_potentie": gjson_water_potentie,
+            "buurt_potentie": gjson_buurt_potentie,
+            "warmtenet": gjson_warmtenet,
         }
-        if manual_selection_active:
-            chart_kwargs.update(
-                selection_mode="single-object",
-                on_select="rerun",
-            )
-        chart_state = st.pydeck_chart(deck, **chart_kwargs)
-
-        if manual_selection_active:
-            selected_hex = None
-            payload_candidates = [
-                st.session_state.get(f"{chart_key}_selected_data"),
-                st.session_state.get(chart_key),
-                getattr(chart_state, "selection", None),
-                chart_state,
+    
+        extra_layers = []
+        if any(
+            [
+                st.session_state.get(LAYER_CFG["energiearmoede"]["toggle_key"]),
+                st.session_state.get(LAYER_CFG["koopwoningen"]["toggle_key"]),
+                st.session_state.get(LAYER_CFG["wooncorporatie"]["toggle_key"]),
+                st.session_state.get(LAYER_CFG["water_potentie"]["toggle_key"]),
+                st.session_state.get(LAYER_CFG["buurt_potentie"]["toggle_key"]),
             ]
-            for payload in payload_candidates:
-                selected_hex = extract_selected_hex_from_payload(payload)
-                if selected_hex:
-                    break
-            if selected_hex and st.session_state.get("manual_site_h3") != selected_hex:
-                st.session_state["manual_site_h3"] = selected_hex
-
-    # Opruimen om RAM-pieken terug te geven
-    del (
-        deck,
-        all_layers,
-        layers,
-        base_layers,
-        extra_layers,
-        warmtenet_layers,
-        df_hex_view,
-    )
-    sites_records = None
-    sites_costed_records = None
-    gc.collect()
-
-    # ========== Tabellen ==========
-    with tables_container:
-        render_tabs(
-            df_filtered,
-            threshold_kwh,
-            ui["show_sites_layer"],
-            st.session_state.get("sites_costed"),
-            warmtenet_gjson=gjson_warmtenet,
-            show_warmtenet=bool(ui.get("show_warmtenet_model")),
-            show_wegennet=bool(ui.get("show_wegennet")),
-            warmtenet_wp=ui.get("warmtenet_wp_selectie", []),
-            wegennet_wp=ui.get("wegennet_wp_selectie", []),
+        ):
+            extra_layers = create_extra_layers(
+                geojson_dict,
+                ui["woonplaats_selectie"],
+                ui["zoom_level"],
+                ui["extra_opacity"],
+                potential_meta,
+            )
+    
+        warmtenet_layers: list[pdk.Layer] = []
+        if ui.get("show_warmtenet_model") and gjson_warmtenet:
+            warmtenet_layers = create_warmtenet_layers(
+                gjson_warmtenet,
+                ui.get("warmtenet_wp_selectie", ui.get("woonplaats_selectie", [])),
+                (warmtenet_meta or {}).get("color_map", {}),
+                ui.get("warmtenet_selected_keys", []),
+                (warmtenet_meta or {}).get("type_by_key", {}),
+                ui.get("warmtenet_type_selectie", []),
+                opacity=float(
+                    ui.get(
+                        "warmtenet_opacity",
+                        (warmtenet_meta or {}).get("default_opacity", 0.85),
+                    )
+                ),
+                show_lines=bool(ui.get("warmtenet_show_lines", True)),
+                show_sources=bool(ui.get("warmtenet_show_sources", True)),
+                show_objects=bool(ui.get("warmtenet_show_objects", True)),
+            )
+    
+        wegennet_layers: list[pdk.Layer] = []
+        wegennet_wp = ui.get("wegennet_wp_selectie", [])
+        wegennet_cfg = LAYER_CFG.get("wegennet", {})
+        min_zoom = int(wegennet_cfg.get("min_zoom", 11))
+        gemeente_sel = st.session_state.get("gemeente_selectie", [])
+        if (
+            ui.get("show_wegennet")
+            and wegennet_wp
+            and int(ui.get("zoom_level", 0)) >= min_zoom
+            and len(gemeente_sel) == 1
+        ):
+            wegennet_path = resolve_wegennet_path(gemeente_sel[0])
+            coord_precision = int(wegennet_cfg.get("coord_precision", 4))
+            gjson_wegennet = load_geojson(
+                wegennet_path,
+                keep_props=[
+                    "type",
+                    "length_m",
+                    "area_name",
+                ],
+                coord_precision=coord_precision,
+            )
+            gjson_wegennet = convert_geojson_to_wgs84_if_needed(gjson_wegennet)
+            wegennet_layers = create_wegennet_layers(
+                gjson_wegennet,
+                wegennet_wp,
+                ui.get("wegennet_type_selectie", []),
+                opacity=float(
+                    ui.get(
+                        "wegennet_opacity",
+                        (wegennet_meta or {}).get("default_opacity", 0.8),
+                    )
+                ),
+                zoom_level=int(ui.get("zoom_level", 0)),
+            )
+    
+        # H3 hoofdlaag(en) per zoom
+        base_hex_cols = [
+            "h3_index",
+            "color",
+            "scaled_elevation",
+            "woonplaats",
+            "aantal_huizen",
+            "aantal_VBOs",
+            "MWh_per_ha_r",
+            "gemiddeld_jaarverbruik_mWh_r",
+            "MWh_per_pand_r",
+            "area_ha_r",
+            "area_m2",
+            "kWh_per_m2",
+            "totale_oppervlakte",
+            "bouwjaar",
+        ]
+        df_hex_view = df_filtered.loc[:, base_hex_cols].copy()
+        df_hex_view["geo_extra_rows"] = ""
+        df_hex_view["gemeente_row_display"] = "block"
+        df_hex_view["buurt_row_display"] = "block"
+    
+        def _fmt0_val(series):
+            return series.astype("int64").map(lambda v: format_dutch_number(int(v), 0))
+    
+        def _fmt2_val(series):
+            return series.astype("float32").map(
+                lambda v: format_dutch_number(float(v), 2)
+            )
+    
+        def _fmt4_val(series):
+            return series.astype("float32").map(
+                lambda v: format_dutch_number(float(v), 4)
+            )
+    
+        df_hex_view["aantal_huizen_fmt"] = _fmt0_val(df_hex_view["aantal_huizen"])
+        df_hex_view["aantal_VBOs_fmt"] = _fmt0_val(df_hex_view["aantal_VBOs"])
+        df_hex_view["MWh_per_ha_r_fmt"] = _fmt2_val(df_hex_view["MWh_per_ha_r"])
+        df_hex_view["gemiddeld_jaarverbruik_mWh_r_fmt"] = _fmt0_val(
+            df_hex_view["gemiddeld_jaarverbruik_mWh_r"]
         )
-    st.session_state["_map_changed"] = False
+        df_hex_view["MWh_per_pand_fmt"] = _fmt2_val(df_hex_view["MWh_per_pand_r"])
+        df_hex_view["area_ha_r_fmt"] = _fmt4_val(df_hex_view["area_ha_r"])
+        df_hex_view["area_m2_fmt"] = _fmt0_val(
+            df_hex_view["area_m2"].round().astype("int64")
+        )
+        df_hex_view["kWh_per_m2_fmt"] = _fmt0_val(df_hex_view["kWh_per_m2"])
+        df_hex_view["totale_oppervlakte_fmt"] = _fmt0_val(
+            df_hex_view["totale_oppervlakte"]
+        )
+        df_hex_view["bouwjaar_fmt"] = (
+            df_hex_view["bouwjaar"].astype("int64").map(lambda v: str(int(v)))
+        )
+    
+        df_hex_view["hex_section_display"] = "block"
+        df_hex_view["site_section_display"] = "none"
+        df_hex_view["geo_section_display"] = "none"
+    
+        cols_for_hex = [
+            "h3_index",
+            "color",
+            "scaled_elevation",
+            "woonplaats",
+            "aantal_huizen",
+            "aantal_VBOs",
+            "MWh_per_ha_r",
+            "MWh_per_pand_r",
+            "gemiddeld_jaarverbruik_mWh_r",
+            "area_ha_r",
+            "kWh_per_m2",
+            "totale_oppervlakte",
+            "bouwjaar",
+            "aantal_huizen_fmt",
+            "aantal_VBOs_fmt",
+            "MWh_per_ha_r_fmt",
+            "MWh_per_pand_fmt",
+            "gemiddeld_jaarverbruik_mWh_r_fmt",
+            "area_ha_r_fmt",
+            "area_m2_fmt",
+            "kWh_per_m2_fmt",
+            "totale_oppervlakte_fmt",
+            "bouwjaar_fmt",
+            "hex_section_display",
+            "site_section_display",
+            "geo_section_display",
+            "geo_extra_rows",
+            "gemeente_row_display",
+            "buurt_row_display",
+        ]
+        df_hex_view = df_hex_view.loc[:, cols_for_hex]
+        indic_value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
+        indic_mask = df_filtered[indic_value_col] > threshold_display
+        df_indicative = df_hex_view.loc[indic_mask, :]
+        _log_ram("before_pydeck_layers")
+        warmte_opacity = float(
+            ui.get("warmte_hex_opacity", st.session_state.get("warmte_hex_opacity", 0.6))
+        )
+        layers = create_layers_by_zoom(
+            df_hex_view,
+            ui["show_main_layer"],
+            ui["extruded"],
+            ui["zoom_level"],
+            warmte_opacity,
+        )
+    
+        site_layers = []
+        if allow_sites and sites_records:
+            sites_costed_records = (
+                st.session_state.sites_costed
+                if st.session_state.get("sites_ready")
+                else None
+            )
+            site_layers = create_site_layers(
+                sites_records,
+                sites_costed_records,
+                site_hex_opacity=float(
+                    ui.get(
+                        "sites_hex_opacity", st.session_state.get("sites_hex_opacity", 0.85)
+                    )
+                ),
+            )
+    
+        # Indicatieve aandachtslaag
+        if ui["show_indicative_layer"] and not df_indicative.empty:
+            layers.append(
+                create_indicative_area_layer(
+                    df_indicative, ui["extruded"], ui["zoom_level"], warmte_opacity
+                )
+            )
+    
+        # Basemap
+        hide_bg = bool(ui.get("hide_basemap"))
+        basemap_style = ui.get("basemap_style", ui.get("map_style"))
+        base_layers = build_base_layers(basemap_style, hide_bg)
+    
+        # Volgorde: basemap -> woonlagen -> H3/indicatief/sites
+        all_layers = (
+            base_layers + extra_layers + layers + wegennet_layers + warmtenet_layers + site_layers
+        )
+    
+        # ========== ViewState ==========
+        def _view_for_selection(df_full, woonplaatsen_geselecteerd):
+            """Bepaal kaartcentrum en zoom op basis van de huidige selectie."""
+            manual_hex_current = st.session_state.get("manual_site_h3")
+            if current_sites_mode == "manual" and manual_hex_current:
+                lat_manual, lon_manual = h3.cell_to_latlng(manual_hex_current)
+                return lat_manual, lon_manual, 13.0
+            friesland_center = (53.125, 5.75)
+            friesland_zoom = 8
+            min_zoom, max_zoom = 8, 13.0
+            if not woonplaatsen_geselecteerd:
+                return friesland_center[0], friesland_center[1], friesland_zoom
+            df_sel = df_full[df_full["woonplaats"].isin(woonplaatsen_geselecteerd)]
+            if df_sel.empty:
+                return friesland_center[0], friesland_center[1], friesland_zoom
+            lat_center = float(df_sel["latitude"].mean())
+            lon_center = float(df_sel["longitude"].mean())
+            if len(woonplaatsen_geselecteerd) == 1:
+                return lat_center, lon_center, 13.0
+            lat_min = float(df_sel["latitude"].min())
+            lat_max = float(df_sel["latitude"].max())
+            lon_min = float(df_sel["longitude"].min())
+            lon_max = float(df_sel["longitude"].max())
+            lat_span = max(0.0001, lat_max - lat_min)
+            lon_span = max(0.0001, lon_max - lon_min)
+            span = max(lat_span, lon_span)
+            if span > 2.0:
+                zoom = 8.0
+            elif span > 1.0:
+                zoom = 8.0
+            elif span > 0.5:
+                zoom = 9.0
+            elif span > 0.25:
+                zoom = 9.5
+            elif span > 0.12:
+                zoom = 10.0
+            elif span > 0.06:
+                zoom = 11.0
+            elif span > 0.03:
+                zoom = 12.0
+            else:
+                zoom = 13.0
+            zoom = max(min_zoom, min(max_zoom, zoom))
+            return lat_center, lon_center, zoom
+    
+        lat, lon, zoom = _view_for_selection(df_view_source, ui["woonplaats_selectie"])
+        st.session_state.view_state = pdk.ViewState(
+            longitude=lon,
+            latitude=lat,
+            zoom=zoom,
+            min_zoom=7.5,
+            max_zoom=16,
+            pitch=0,
+            bearing=0,
+        )
+    
+        if st.session_state.show_map:
+            # ========== KPI ==========
+            with kpi_container:
+                render_kpis(
+                    df_filtered,
+                    st.session_state.participatie,
+                    include_participation=False,
+                )
+    
+            # ========== Kaart render + cleanup ==========
+            deck_kwargs = {"map_style": ui.get("map_style")}
+    
+            with map_container:
+                deck = pdk.Deck(
+                    layers=all_layers,
+                    initial_view_state=st.session_state.view_state,
+                    tooltip=build_deck_tooltip(),
+                    **deck_kwargs,
+                )
+    
+                manual_selection_active = show_sites_layer and manual_mode
+                chart_key = "main_map_deck_chart"
+                chart_kwargs = {
+                    "width": "stretch",
+                    "key": chart_key,
+                }
+                if manual_selection_active:
+                    chart_kwargs.update(
+                        selection_mode="single-object",
+                        on_select="rerun",
+                    )
+                chart_state = st.pydeck_chart(deck, **chart_kwargs)
+    
+                if manual_selection_active:
+                    selected_hex = None
+                    payload_candidates = [
+                        st.session_state.get(f"{chart_key}_selected_data"),
+                        st.session_state.get(chart_key),
+                        getattr(chart_state, "selection", None),
+                        chart_state,
+                    ]
+                    for payload in payload_candidates:
+                        selected_hex = extract_selected_hex_from_payload(payload)
+                        if selected_hex:
+                            break
+                    if (
+                        selected_hex
+                        and st.session_state.get("manual_site_h3") != selected_hex
+                    ):
+                        st.session_state["manual_site_h3"] = selected_hex
+    
+            # Opruimen om RAM-pieken terug te geven
+            del (
+                deck,
+                all_layers,
+                layers,
+                base_layers,
+                extra_layers,
+                warmtenet_layers,
+                df_hex_view,
+            )
+            sites_records = None
+            sites_costed_records = None
+            gc.collect()
+    
+            # ========== Tabellen ==========
+            with tables_container:
+                render_tabs(
+                    df_filtered,
+                    threshold_kwh,
+                    ui["show_sites_layer"],
+                    st.session_state.get("sites_costed"),
+                    warmtenet_gjson=gjson_warmtenet,
+                    show_warmtenet=bool(ui.get("show_warmtenet_model")),
+                    show_wegennet=bool(ui.get("show_wegennet")),
+                    warmtenet_wp=ui.get("warmtenet_wp_selectie", []),
+                    wegennet_wp=ui.get("wegennet_wp_selectie", []),
+                )
+            st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):
         layer_state = {
             "energiearmoede": show_energiearmoede,
@@ -1159,36 +1280,80 @@ if st.session_state.show_map:
             },
         }
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-        with st.spinner("PDF rapport genereren..."):
-            _cleanup_report_file()
-            st.session_state["report_pdf"] = None
-            map_image = prepare_report_image_bytes(
-                st.session_state.get("report_map_image"),
-                dpi=ui.get("report_dpi"),
-            )
-            if map_image is not None:
-                st.session_state["report_map_image"] = map_image
-            st.session_state["report_pdf_path"] = build_report_pdf(
-                df_filtered,
-                ui=ui,
-                layer_state=layer_state,
-                sites_costed=st.session_state.get("sites_costed"),
-                warmtenet_gjson=gjson_warmtenet,
-                heat_unit=heat_unit,
-                threshold_display=threshold_display,
-                map_image=map_image,
-            )
-            st.session_state["report_filename"] = (
-                f"FRL_WarmteAtlas_{timestamp}.pdf"
-            )
+        with report_status_slot.container():
+            with st.spinner("PDF rapport genereren..."):
+                _cleanup_report_file()
+                st.session_state["report_pdf"] = None
+                map_image = prepare_report_image_bytes(
+                    st.session_state.get("report_map_image"),
+                    dpi=ui.get("report_dpi"),
+                )
+                if map_image is not None:
+                    st.session_state["report_map_image"] = map_image
+                try:
+                    st.session_state["report_pdf_path"] = build_report_pdf(
+                        df_filtered,
+                        ui=ui,
+                        layer_state=layer_state,
+                        sites_costed=st.session_state.get("sites_costed"),
+                        warmtenet_gjson=gjson_warmtenet,
+                        heat_unit=heat_unit,
+                        threshold_display=threshold_display,
+                        map_image=map_image,
+                    )
+                    st.session_state["report_filename"] = (
+                        f"FRL_WarmteAtlas_{timestamp}.pdf"
+                    )
+                    st.session_state["report_map_image_error"] = None
+                except Exception:
+                    try:
+                        st.session_state["report_pdf_path"] = build_report_pdf(
+                            df_filtered,
+                            ui=ui,
+                            layer_state=layer_state,
+                            sites_costed=st.session_state.get("sites_costed"),
+                            warmtenet_gjson=gjson_warmtenet,
+                            heat_unit=heat_unit,
+                            threshold_display=threshold_display,
+                            map_image=None,
+                        )
+                        st.session_state["report_filename"] = (
+                            f"FRL_WarmteAtlas_{timestamp}.pdf"
+                        )
+                        st.session_state["report_map_image_error"] = (
+                            "De kaartafbeelding kon niet worden gebruikt. "
+                            "PDF is zonder afbeelding gemaakt."
+                        )
+                    except Exception:
+                        st.session_state["report_pdf_path"] = None
+                        st.session_state["report_filename"] = None
+                        st.session_state["report_map_image_error"] = (
+                            "PDF maken is mislukt. Probeer het opnieuw."
+                        )
+                report_path = st.session_state.get("report_pdf_path")
+                if report_path and Path(report_path).exists():
+                    try:
+                        st.session_state["report_pdf"] = Path(report_path).read_bytes()
+                    except Exception:
+                        st.session_state["report_pdf"] = None
+        report_status_slot.empty()
         st.session_state["report_requested"] = False
+        st.session_state["report_image_uploaded"] = False
     if report_slot is not None:
+        report_pdf = st.session_state.get("report_pdf")
         report_path = st.session_state.get("report_pdf_path")
         report_filename = (
             st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
         )
         with report_slot:
-            if report_path and Path(report_path).exists():
+            if report_pdf:
+                st.download_button(
+                    "Download PDF rapport",
+                    data=report_pdf,
+                    file_name=report_filename,
+                    mime="application/pdf",
+                )
+            elif report_path and Path(report_path).exists():
                 st.download_button(
                     "Download PDF rapport",
                     data=lambda p=report_path: open(p, "rb"),
@@ -1196,7 +1361,10 @@ if st.session_state.show_map:
                     mime="application/pdf",
                 )
             else:
-                st.button("Maak PDF rapport", on_click=_request_report)
+                if st.session_state.get("_map_changed"):
+                    st.button("Maak kaart", on_click=_handle_make_map_click)
+                else:
+                    st.button("Maak PDF rapport", on_click=_request_report)
 
 else:
     with map_container:
@@ -1215,12 +1383,20 @@ else:
         else:
             st.info("Klik op 'Maak kaart' om de kaart weer te geven.")
     if report_slot is not None:
+        report_pdf = st.session_state.get("report_pdf")
         report_path = st.session_state.get("report_pdf_path")
         report_filename = (
             st.session_state.get("report_filename") or "warmteatlas_rapport.pdf"
         )
         with report_slot:
-            if report_path and Path(report_path).exists():
+            if report_pdf:
+                st.download_button(
+                    "Download PDF rapport",
+                    data=report_pdf,
+                    file_name=report_filename,
+                    mime="application/pdf",
+                )
+            elif report_path and Path(report_path).exists():
                 st.download_button(
                     "Download PDF rapport",
                     data=lambda p=report_path: open(p, "rb"),
@@ -1228,4 +1404,7 @@ else:
                     mime="application/pdf",
                 )
             else:
-                st.button("Maak PDF rapport", on_click=_request_report)
+                if st.session_state.get("_map_changed"):
+                    st.button("Maak kaart", on_click=_handle_make_map_click)
+                else:
+                    st.button("Maak PDF rapport", on_click=_request_report)

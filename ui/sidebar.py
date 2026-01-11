@@ -1295,19 +1295,29 @@ def build_sidebar(
 
         # ---------------- Rapport samenstellen ----------------
         with st.expander("Rapport samenstellen", expanded=False):
+            def _cleanup_report_file():
+                report_path = st.session_state.get("report_pdf_path")
+                if report_path:
+                    try:
+                        Path(report_path).unlink()
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+                st.session_state["report_pdf_path"] = None
+
             def _clear_report_cache():
+                _cleanup_report_file()
                 st.session_state["report_pdf"] = None
                 st.session_state["report_filename"] = None
                 st.session_state["report_requested"] = False
+                st.session_state["report_map_image_error"] = None
 
             quality_labels = {
-                150: "Compact (A4, 150 dpi)",
                 200: "Licht (A4, 200 dpi)",
                 300: "Standaard (A4, 300 dpi)",
-                450: "Hoog (A4, 450 dpi - 4K)",
-                600: "Ultra (A4, 600 dpi)",
             }
-            dpi_options = [150, 200, 300, 450, 600]
+            dpi_options = [200, 300]
             selected_dpi = st.selectbox(
                 "PDF kwaliteit",
                 options=dpi_options,
@@ -1359,23 +1369,34 @@ def build_sidebar(
                 label_visibility="collapsed",
             )
             if uploaded is not None:
-                st.session_state["report_map_image"] = uploaded.getvalue()
-                st.session_state["report_map_image_name"] = uploaded.name
-                st.session_state["report_pdf"] = None
-                st.session_state["report_filename"] = None
-                st.session_state["report_map_image_error"] = None
+                uploaded_bytes = uploaded.getvalue()
+                upload_sig = (uploaded.name, len(uploaded_bytes))
+                if st.session_state.get("report_map_image_sig") != upload_sig:
+                    st.session_state["report_map_image"] = uploaded_bytes
+                    st.session_state["report_map_image_name"] = uploaded.name
+                    st.session_state["report_map_image_sig"] = upload_sig
+                    st.session_state["report_image_uploaded"] = True
+                    _clear_report_cache()
+            elif st.session_state.get("report_map_image_sig"):
+                st.session_state["report_map_image"] = None
+                st.session_state["report_map_image_name"] = None
+                st.session_state["report_map_image_sig"] = None
+                st.session_state["report_upload_key"] = upload_key + 1
+                _clear_report_cache()
             map_image = st.session_state.get("report_map_image")
             map_image_name = st.session_state.get("report_map_image_name") or "kaart.png"
+            report_image_error = st.session_state.get("report_map_image_error")
+            if report_image_error:
+                st.error(report_image_error)
             if map_image:
                 st.caption(f"Afbeelding klaar: {map_image_name}")
                 st.image(map_image, caption="Preview kaart", width="stretch")
                 if st.button("Verwijder kaartafbeelding", key="report_map_clear"):
                     st.session_state["report_map_image"] = None
                     st.session_state["report_map_image_name"] = None
+                    st.session_state["report_map_image_sig"] = None
                     st.session_state["report_upload_key"] = upload_key + 1
-                    st.session_state["report_pdf"] = None
-                    st.session_state["report_filename"] = None
-                    st.session_state["report_map_image_error"] = None
+                    _clear_report_cache()
                     st.rerun()
             report_slot = st.container()
             ui["report_slot"] = report_slot
