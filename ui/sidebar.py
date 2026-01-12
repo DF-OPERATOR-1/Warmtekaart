@@ -149,20 +149,31 @@ def _render_big_legend(
     border = colors["border"]
     text = colors["text"]
     muted = colors["muted"]
-    pot_color = "#B14470" if dark_mode else "#3A1B2F"
+    pot_color = "#144A3A"
     unit_norm = (heat_unit or "").strip().lower()
 
     if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
-        fmt = lambda v: format_dutch_number(v, 0)
-        start = 25
         labels = [
-            f"{fmt(start)} – {fmt(MWH_HA_BREAKS[0])} MWh/ha",
-            f"{fmt(MWH_HA_BREAKS[0])} – {fmt(MWH_HA_BREAKS[1])} MWh/ha",
-            f"{fmt(MWH_HA_BREAKS[1])} – {fmt(MWH_HA_BREAKS[2])} MWh/ha",
-            f"{fmt(MWH_HA_BREAKS[2])} – {fmt(MWH_HA_BREAKS[3])} MWh/ha",
-            f"{fmt(MWH_HA_BREAKS[3])} – {fmt(MWH_HA_BREAKS[4])} MWh/ha",
-            f"> {fmt(MWH_HA_BREAKS[4])} MWh/ha",
+            "0-50 MWh/ha",
+            "50-100 MWh/ha",
+            "100-150 MWh/ha",
+            "150-200 MWh/ha",
+            "200-300 MWh/ha",
+            "300-500 MWh/ha",
+            "> 500 MWh/ha",
         ]
+        info_items = [
+            ("0-50 MWh/ha", "Niet haalbaar"),
+            ("50-100 MWh/ha", "Niet haalbaar"),
+            ("100-150 MWh/ha", "Lastig (indien genoeg warmte beschikbaar)"),
+            ("150-200 MWh/ha", "Potentie"),
+            ("200-300 MWh/ha", "Goed"),
+            ("300-500 MWh/ha", "Heel goed"),
+            ("> 500 MWh/ha", "Altijd doen"),
+        ]
+        info_text = "\n".join(
+            f"- **{rng}**: {uitleg}" for rng, uitleg in info_items
+        )
         legend_rows = [
             (_rgba_to_css(color), label) for color, label in zip(MWH_HA_COLORS, labels)
         ]
@@ -185,6 +196,7 @@ def _render_big_legend(
             f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
         )
         title = "Warmtevraag (kWh/m²)"
+        info_text = "- Lagere warmtevraag naar hogere warmtevraag."
 
     legend_html_rows = "".join(
         f"<div><span class='color-box' style='background-color: {color};'></span> {label}</div>"
@@ -208,6 +220,9 @@ def _render_big_legend(
         </div>
     """
     st.markdown(legend_html, unsafe_allow_html=True)
+    if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
+        with st.expander("Uitleg legenda"):
+            st.markdown(info_text)
 
 
 # ---------------------------
@@ -260,7 +275,7 @@ def build_sidebar(
             "grenswaarde_input", 100
         )
     st.session_state.setdefault("grenswaarde_input", 100)  # backward compat
-    st.session_state.setdefault("grenswaarde_input_mwhha", 5500)
+    st.session_state.setdefault("grenswaarde_input_mwhha", 550)
     st.session_state.setdefault("participatie", 80)
     st.session_state.setdefault("LAYER_CFG", LAYER_CFG)
     st.session_state.setdefault("BASEMAP_CFG", BASEMAP_CFG)
@@ -374,9 +389,9 @@ def build_sidebar(
             ui["heat_unit"] = heat_unit
 
             if heat_unit == "MWh/ha":
-                min_threshold_display = 5001
+                min_threshold_display = int(MWH_HA_BREAKS[-1])
                 default_mwhha = int(
-                    float(st.session_state.get("grenswaarde_input_mwhha", 5500))
+                    float(st.session_state.get("grenswaarde_input_mwhha", 550))
                 )
                 input_key = "grenswaarde_input_mwhha_str"
                 raw_val = st.session_state.get(input_key)

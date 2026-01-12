@@ -328,15 +328,16 @@ colorbrewer_colors = [
     [215, 48, 39, 150],  # >=50 Rood
 ]
 
-# MWh/ha klassen (warmtevraagdichtheid) – 6 klassen, start bij ~25–100
-MWH_HA_BREAKS = [100, 500, 1000, 2000, 5000]
+# MWh/ha klassen (warmtevraagdichtheid) – 7 klassen, start bij 0–50
+MWH_HA_BREAKS = [50, 100, 150, 200, 300, 500]
 MWH_HA_COLORS = [
-    [170, 205, 240, 235],  # ~25-100 lichtblauw
-    [90, 140, 200, 235],  # 100-500 blauw
-    [245, 205, 140, 235],  # 500-1000 geel/oranje licht
-    [240, 170, 90, 235],  # 1000-2000 oranje
-    [210, 100, 60, 235],  # 2000-5000 rood-oranje
-    [130, 50, 55, 235],  # >5000 donkerrood
+    [200, 0, 40, 235],  # 0-50 rood (duidelijker)
+    [235, 120, 0, 235],  # 50-100 oranje
+    [245, 200, 0, 235],  # 100-150 geel
+    [140, 210, 120, 235],  # 150-200 licht groen
+    [40, 150, 60, 235],  # 200-300 groen
+    [0, 110, 40, 235],  # 300-500 donker groen
+    [0, 80, 25, 235],  # >500 diep donkergroen
 ]
 
 
