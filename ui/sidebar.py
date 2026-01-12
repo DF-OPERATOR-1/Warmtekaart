@@ -141,7 +141,11 @@ def _rgba_to_css(color: list[int]) -> str:
 
 
 def _render_big_legend(
-    current_threshold_display: float, heat_unit: str, *, dark_mode: bool
+    current_threshold_display: float,
+    heat_unit: str,
+    *,
+    dark_mode: bool,
+    show_threshold: bool,
 ):
     """Render de hoofdlegenda voor de warmtevraaglaag."""
     colors = _legend_theme_colors(dark_mode)
@@ -149,8 +153,10 @@ def _render_big_legend(
     border = colors["border"]
     text = colors["text"]
     muted = colors["muted"]
-    pot_color = "#144A3A"
     unit_norm = (heat_unit or "").strip().lower()
+    pot_color = "rgb(54,29,46)"
+    if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
+        pot_color = "#144A3A"
 
     if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
         labels = [
@@ -177,10 +183,13 @@ def _render_big_legend(
         legend_rows = [
             (_rgba_to_css(color), label) for color, label in zip(MWH_HA_COLORS, labels)
         ]
-        pot_label_value = current_threshold_display
-        pot_label = (
-            f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
-        )
+        if show_threshold:
+            pot_label_value = current_threshold_display
+            pot_label = (
+                f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
+            )
+        else:
+            pot_label = None
         title = "Warmtevraag (MWh/ha)"
     else:
         legend_rows = [
@@ -191,10 +200,13 @@ def _render_big_legend(
                 f"50,0 - {format_dutch_number(current_threshold_display, 0)} kWh/m²",
             ),
         ]
-        pot_label_value = current_threshold_display
-        pot_label = (
-            f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
-        )
+        if show_threshold:
+            pot_label_value = current_threshold_display
+            pot_label = (
+                f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
+            )
+        else:
+            pot_label = None
         title = "Warmtevraag (kWh/m²)"
         info_text = "- Lagere warmtevraag naar hogere warmtevraag."
 
@@ -216,7 +228,7 @@ def _render_big_legend(
         <div class="legend">
             <div class="legend-title">{title}</div>
             {legend_html_rows}
-            <div><span class="color-box" style="background-color: {pot_color};"></span> {pot_label}</div>
+            {f"<div><span class='color-box' style='background-color: {pot_color};'></span> {pot_label}</div>" if pot_label else ""}
         </div>
     """
     st.markdown(legend_html, unsafe_allow_html=True)
@@ -367,6 +379,9 @@ def build_sidebar(
             ui["show_main_layer"] = st.toggle(
                 "Gasverbruik", value=True, key="show_main_layer"
             )
+            ui["show_indicative_layer"] = st.toggle(
+                "Aandachtsgebieden tonen", value=False, key="show_indicative_layer"
+            )
 
             heat_unit_options = ["MWh/ha", "kWh/m²"]
             heat_unit_labels = {
@@ -393,24 +408,31 @@ def build_sidebar(
                 default_mwhha = int(
                     float(st.session_state.get("grenswaarde_input_mwhha", 550))
                 )
-                input_key = "grenswaarde_input_mwhha_str"
-                raw_val = st.session_state.get(input_key)
-                if raw_val is None:
-                    st.session_state[input_key] = format_dutch_number(default_mwhha, 0)
+                if ui["show_indicative_layer"]:
+                    input_key = "grenswaarde_input_mwhha_str"
+                    raw_val = st.session_state.get(input_key)
+                    if raw_val is None:
+                        st.session_state[input_key] = format_dutch_number(
+                            default_mwhha, 0
+                        )
+                    else:
+                        parsed_val = parse_dutch_int(
+                            str(raw_val), fallback=default_mwhha
+                        )
+                        if parsed_val < min_threshold_display:
+                            parsed_val = min_threshold_display
+                        formatted_val = format_dutch_number(parsed_val, 0)
+                        if str(raw_val) != formatted_val:
+                            st.session_state[input_key] = formatted_val
+                    threshold_str = st.text_input(
+                        "Stel de minimale grenswaarde (threshold) in per MWh/ha:",
+                        key=input_key,
+                    )
+                    threshold_display_raw = parse_dutch_int(
+                        threshold_str or "", fallback=default_mwhha
+                    )
                 else:
-                    parsed_val = parse_dutch_int(str(raw_val), fallback=default_mwhha)
-                    if parsed_val < min_threshold_display:
-                        parsed_val = min_threshold_display
-                    formatted_val = format_dutch_number(parsed_val, 0)
-                    if str(raw_val) != formatted_val:
-                        st.session_state[input_key] = formatted_val
-                threshold_str = st.text_input(
-                    "Stel de minimale grenswaarde (threshold) in per MWh/ha:",
-                    key=input_key,
-                )
-                threshold_display_raw = parse_dutch_int(
-                    threshold_str or "", fallback=default_mwhha
-                )
+                    threshold_display_raw = default_mwhha
                 threshold_display = max(threshold_display_raw, min_threshold_display)
                 st.session_state["grenswaarde_input_mwhha"] = threshold_display
                 threshold_kwh = float(threshold_display) / 10.0
@@ -419,24 +441,31 @@ def build_sidebar(
                 default_kwh = int(
                     float(st.session_state.get("grenswaarde_input_kwh", 100))
                 )
-                input_key = "grenswaarde_input_kwh_str"
-                raw_val = st.session_state.get(input_key)
-                if raw_val is None:
-                    st.session_state[input_key] = format_dutch_number(default_kwh, 0)
+                if ui["show_indicative_layer"]:
+                    input_key = "grenswaarde_input_kwh_str"
+                    raw_val = st.session_state.get(input_key)
+                    if raw_val is None:
+                        st.session_state[input_key] = format_dutch_number(
+                            default_kwh, 0
+                        )
+                    else:
+                        parsed_val = parse_dutch_int(
+                            str(raw_val), fallback=default_kwh
+                        )
+                        if parsed_val < min_threshold_display:
+                            parsed_val = min_threshold_display
+                        formatted_val = format_dutch_number(parsed_val, 0)
+                        if str(raw_val) != formatted_val:
+                            st.session_state[input_key] = formatted_val
+                    threshold_str = st.text_input(
+                        "Stel de minimale grenswaarde (threshold) in per kWh/m²:",
+                        key=input_key,
+                    )
+                    threshold_display_raw = parse_dutch_int(
+                        threshold_str or "", fallback=default_kwh
+                    )
                 else:
-                    parsed_val = parse_dutch_int(str(raw_val), fallback=default_kwh)
-                    if parsed_val < min_threshold_display:
-                        parsed_val = min_threshold_display
-                    formatted_val = format_dutch_number(parsed_val, 0)
-                    if str(raw_val) != formatted_val:
-                        st.session_state[input_key] = formatted_val
-                threshold_str = st.text_input(
-                    "Stel de minimale grenswaarde (threshold) in per kWh/m²:",
-                    key=input_key,
-                )
-                threshold_display_raw = parse_dutch_int(
-                    threshold_str or "", fallback=default_kwh
-                )
+                    threshold_display_raw = default_kwh
                 threshold_display = max(threshold_display_raw, min_threshold_display)
                 st.session_state["grenswaarde_input_kwh"] = threshold_display
                 threshold_kwh = float(threshold_display)
@@ -444,10 +473,11 @@ def build_sidebar(
             ui["threshold"] = threshold_kwh
             ui["threshold_display"] = threshold_display
 
-            _render_big_legend(threshold_display, heat_unit, dark_mode=dark_mode)
-
-            ui["show_indicative_layer"] = st.toggle(
-                "Aandachtsgebieden tonen", value=True, key="show_indicative_layer"
+            _render_big_legend(
+                threshold_display,
+                heat_unit,
+                dark_mode=dark_mode,
+                show_threshold=ui["show_indicative_layer"],
             )
             ui["warmte_hex_opacity"] = st.slider(
                 "Transparantie warmtevraag-hexagonen",
@@ -458,12 +488,13 @@ def build_sidebar(
                 key="warmte_hex_opacity",
                 help=opacity_help,
             )
-            with st.expander("Wat doet de grenswaarde?"):
-                st.write(
-                    "*Pas de grenswaarde bovenin aan om te bepalen welk verbruik jij als grens van ‘extra aandacht’ ziet.*\n\n"
-                    "De legenda en kaartkleuren passen mee met de gekozen eenheid. "
-                    "De grenswaarde wordt toegepast in dezelfde eenheid en wordt ook gebruikt voor de aandachtsgebieden."
-                )
+            if ui["show_indicative_layer"]:
+                with st.expander("Wat doet de grenswaarde?"):
+                    st.write(
+                        "*Pas de grenswaarde bovenin aan om te bepalen welk verbruik jij als grens van ‘extra aandacht’ ziet.*\n\n"
+                        "De legenda en kaartkleuren passen mee met de gekozen eenheid. "
+                        "De grenswaarde wordt toegepast in dezelfde eenheid en wordt ook gebruikt voor de aandachtsgebieden."
+                    )
 
             # Model
             st.subheader("Potentiële warmtenetten")
