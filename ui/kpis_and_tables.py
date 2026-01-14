@@ -201,6 +201,13 @@ def _fmt2(x):
 def _render_wrapped_table_html(df: pd.DataFrame, height: int) -> None:
     safe_df = df.copy().astype("object")
     safe_df = safe_df.where(pd.notna(safe_df), "")
+    try:
+        dark_mode = st.get_option("theme.base") == "dark"
+    except Exception:
+        dark_mode = False
+    border_color = "#374151" if dark_mode else "#e5e7eb"
+    header_bg = "#1f2937" if dark_mode else "#f9fafb"
+    header_color = "#f9fafb" if dark_mode else "#111827"
     headers = "".join(
         f"<th>{html.escape(str(col)).replace(chr(10), '<br>')}</th>"
         for col in safe_df.columns
@@ -212,7 +219,7 @@ def _render_wrapped_table_html(df: pd.DataFrame, height: int) -> None:
     table_html = f"""
     <style>
       .wrapped-table {{
-        border: 1px solid #e5e7eb;
+        border: 1px solid {border_color};
         border-radius: 10px;
         overflow: auto;
         max-height: {int(height)}px;
@@ -225,15 +232,16 @@ def _render_wrapped_table_html(df: pd.DataFrame, height: int) -> None:
       .wrapped-table th,
       .wrapped-table td {{
         padding: 8px 10px;
-        border-bottom: 1px solid #e5e7eb;
-        border-right: 1px solid #e5e7eb;
+        border-bottom: 1px solid {border_color};
+        border-right: 1px solid {border_color};
         vertical-align: top;
         white-space: normal;
         word-break: break-word;
       }}
       .wrapped-table th {{
-        background: #f9fafb;
+        background: {header_bg};
         font-weight: 600;
+        color: {header_color};
       }}
       .wrapped-table th:last-child,
       .wrapped-table td:last-child {{

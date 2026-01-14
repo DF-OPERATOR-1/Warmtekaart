@@ -151,7 +151,9 @@ def main() -> None:
         df[col] = df[col].astype("category")
 
     if "pandstatus" in df.columns:
-        df = df[df["pandstatus"] == "Pand in gebruik"].reset_index(drop=True)
+        df = df[
+            df["pandstatus"].isin(["Pand in gebruik", "Verbouwing pand"])
+        ].reset_index(drop=True)
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     engine = _select_parquet_engine()

@@ -322,10 +322,13 @@ def get_hexagon_size(zoom_level: int) -> float:
 # Binning & kleuren hoofdlaag
 # ============================================================
 
-colorbrewer_colors = [
-    [69, 117, 180, 150],  # <10 Donkerblauw
-    [254, 224, 144, 150],  # 10-50 Lichtoranje
-    [215, 48, 39, 150],  # >=50 Rood
+KWH_M2_BREAKS = [50, 100, 150, 200]
+KWH_M2_COLORS = [
+    [200, 0, 40, 235],  # 0-50 rood
+    [235, 120, 0, 235],  # 50-100 oranje
+    [245, 200, 0, 235],  # 100-150 geel
+    [140, 210, 120, 235],  # 150-200 licht groen
+    [40, 150, 60, 235],  # >200 groen
 ]
 
 # MWh/ha klassen (warmtevraagdichtheid) – 7 klassen, start bij 0–50
@@ -344,19 +347,8 @@ MWH_HA_COLORS = [
 def get_color(value):
     """
     Wanneer je dit aanpast de bins. Pas dan ook de legenda aan!
-    - Donkerblauw is nu kleiner dan 10
-    - Lichtoranje is tussen 10 en 50
-    - Rood is boven 50
     """
-    try:
-        v = float(value)
-    except Exception:
-        return colorbrewer_colors[0]
-    bins = [10, 50]
-    for i, threshold in enumerate(bins):
-        if v < threshold:
-            return colorbrewer_colors[i]
-    return colorbrewer_colors[-1]
+    return _color_from_breaks(value, KWH_M2_BREAKS, KWH_M2_COLORS)
 
 
 def get_heat_color(value, unit: str):

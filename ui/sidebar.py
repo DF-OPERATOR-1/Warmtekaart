@@ -22,6 +22,8 @@ from core.utils import (
     parse_dutch_int,
     MWH_HA_BREAKS,
     MWH_HA_COLORS,
+    KWH_M2_BREAKS,
+    KWH_M2_COLORS,
 )
 from ui.kpis_and_tables import render_participation_kpis
 
@@ -154,9 +156,7 @@ def _render_big_legend(
     text = colors["text"]
     muted = colors["muted"]
     unit_norm = (heat_unit or "").strip().lower()
-    pot_color = "rgb(54,29,46)"
-    if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
-        pot_color = "#144A3A"
+    pot_color = "#144A3A"
 
     if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
         labels = [
@@ -192,13 +192,15 @@ def _render_big_legend(
             pot_label = None
         title = "Warmtevraag (MWh/ha)"
     else:
+        labels = [
+            "0-50 kWh/m²",
+            "50-100 kWh/m²",
+            "100-150 kWh/m²",
+            "150-200 kWh/m²",
+            "> 200 kWh/m²",
+        ]
         legend_rows = [
-            ("#4575b4", "< 10,0 kWh/m²"),
-            ("#fee090", "10,0 - 50,0 kWh/m²"),
-            (
-                "#d73027",
-                f"50,0 - {format_dutch_number(current_threshold_display, 0)} kWh/m²",
-            ),
+            (_rgba_to_css(color), label) for color, label in zip(KWH_M2_COLORS, labels)
         ]
         if show_threshold:
             pot_label_value = current_threshold_display
@@ -284,8 +286,9 @@ def build_sidebar(
         and "grenswaarde_input_kwh" not in st.session_state
     ):
         st.session_state["grenswaarde_input_kwh"] = st.session_state.get(
-            "grenswaarde_input", 100
+            "grenswaarde_input", 250
         )
+    st.session_state.setdefault("grenswaarde_input_kwh", 250)
     st.session_state.setdefault("grenswaarde_input", 100)  # backward compat
     st.session_state.setdefault("grenswaarde_input_mwhha", 550)
     st.session_state.setdefault("participatie", 80)
@@ -303,6 +306,7 @@ def build_sidebar(
 
         # ---------------- Kaart ----------------
         with st.expander("Kaart", expanded=True):
+            
             ui["zoom_level"] = st.slider(
                 "Selecteer zoomniveau", min_value=9, max_value=12, value=10
             )
@@ -383,6 +387,12 @@ def build_sidebar(
                 "Aandachtsgebieden tonen", value=False, key="show_indicative_layer"
             )
 
+            zoom_level = int(ui.get("zoom_level", 0))
+            default_unit = "MWh/ha" if zoom_level <= 10 else "kWh/m²"
+            st.session_state.setdefault("heat_unit_auto", True)
+            if st.session_state["heat_unit_auto"]:
+                st.session_state["heat_unit"] = default_unit
+
             heat_unit_options = ["MWh/ha", "kWh/m²"]
             heat_unit_labels = {
                 "MWh/ha": "MWh/ha (grondoppervlakte)",
@@ -399,6 +409,7 @@ def build_sidebar(
                 index=heat_unit_options.index(heat_unit_default),
                 horizontal=True,
                 key="heat_unit",
+                on_change=lambda: st.session_state.__setitem__("heat_unit_auto", False),
                 help="Kies of de kaart kleurt op warmtevraag per hectare grondoppervlakte (MWh/ha) of op warmtevraag per m² gebruiksoppervlakte (kWh/m²).",
             )
             ui["heat_unit"] = heat_unit
@@ -437,9 +448,9 @@ def build_sidebar(
                 st.session_state["grenswaarde_input_mwhha"] = threshold_display
                 threshold_kwh = float(threshold_display) / 10.0
             else:
-                min_threshold_display = 50
+                min_threshold_display = KWH_M2_BREAKS[-1]
                 default_kwh = int(
-                    float(st.session_state.get("grenswaarde_input_kwh", 100))
+                    float(st.session_state.get("grenswaarde_input_kwh", 250))
                 )
                 if ui["show_indicative_layer"]:
                     input_key = "grenswaarde_input_kwh_str"
@@ -1374,7 +1385,11 @@ def build_sidebar(
             )
             # caption removed on request
             ui["report_dpi"] = int(selected_dpi)
-            st.write("Upload een PNG-screenshot van de kaart voor het PDF-rapport.")
+            st.write(
+                "1. Zet de kaart in de gewenste weergave.\n"
+                "2. Maak een screenshot van de kaart.\n"
+                "3. Upload de screenshot om deze toe te voegen aan het PDF-rapport."
+            )
             st.markdown(
                 """
                 <style>

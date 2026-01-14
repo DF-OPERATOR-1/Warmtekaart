@@ -326,9 +326,6 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
             pass
 
     if "pandstatus" in df.columns:
-        valid_statuses = {"Pand in gebruik"}
-        mask = df["pandstatus"].astype(str).isin(valid_statuses)
-        df = df.loc[mask].reset_index(drop=True)
         df["pandstatus"] = df["pandstatus"].astype("category")
 
     # ---------- Extra safety ----------

@@ -128,12 +128,13 @@ st.markdown(
 st.markdown(
     """
     <p style="font-size: 16px; margin-top: -10px;">
-        De potentie voor collectieve warmtevoorzieningen in Fryslân middels inzicht in
+        De potentie voor collectieve warmtevoorzieningen in Fryslân door inzicht in
         warmtevraag, warmtebronnen en sociale indicatoren.
     </p>
     """,
     unsafe_allow_html=True,
 )
+warmtevraag_notice_slot = st.empty()
 
 # --- containers om de gewenste volgorde te forceren ---
 kpi_container = st.container()
@@ -270,6 +271,48 @@ else:
     df_filtered_input, ui = sidebar_out
 
 report_slot = ui.get("report_slot") if isinstance(ui, dict) else None
+zoom_level_notice = int(ui.get("zoom_level", 0)) if isinstance(ui, dict) else 0
+heat_unit_notice = str(ui.get("heat_unit", "")).strip() if isinstance(ui, dict) else ""
+if zoom_level_notice in (9, 10):
+    if heat_unit_notice == "kWh/m²":
+        notice_text = (
+            "Gebruiksoppervlakte (kWh/m²), "
+            "<strong>minder geschikt</strong> voor zoomniveau 9 en 10"
+        )
+    else:
+        notice_text = (
+            "Grondoppervlakte (MWh/ha), "
+            "<strong>geschikt</strong> voor zoomniveau 9 en 10"
+        )
+else:
+    if heat_unit_notice == "MWh/ha":
+        notice_text = (
+            "Grondoppervlakte (MWh/ha), "
+            "<strong>minder geschikt</strong> voor zoomniveau 11 en 12"
+        )
+    else:
+        notice_text = (
+            "Gebruiksoppervlakte (kWh/m²), "
+            "<strong>geschikt</strong> voor zoomniveau 11 en 12 (pandniveau)"
+        )
+warmtevraag_notice_slot.markdown(
+    f"""
+    <div style="
+        background-color: #fff4e5;
+        border-left: 4px solid #ff9800;
+        padding: 8px 12px;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        border-radius: 4px;
+        color: #3f2a00;
+        margin-top: 6px;
+    ">
+        <strong>Getoonde warmtevraag:</strong><br>
+        {notice_text}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 def _handle_make_map_click() -> None:
     st.session_state["show_map"] = True
@@ -1195,7 +1238,7 @@ if should_compute:
     
             # ========== Kaart render + cleanup ==========
             deck_kwargs = {"map_style": ui.get("map_style")}
-    
+
             with map_container:
                 deck = pdk.Deck(
                     layers=all_layers,
