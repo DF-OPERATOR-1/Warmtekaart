@@ -1,9 +1,11 @@
 #%%
 import pandas as pd
 # Read the CSV file
-df = pd.read_csv('/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/data.csv', 
-                 low_memory=False)
-
+df = pd.read_csv(
+    r"/Users/anguyen/Documents/GitHub/Warmtekaart/data/safe file/data.csv",
+    sep=",",
+    low_memory=False
+)
 # Als MWh/jaar bestaat: hernoem naar gemiddeld_jaarverbruik_mWh
 if "MWh/jaar" in df.columns and "gemiddeld_jaarverbruik_mWh" not in df.columns:
     df = df.rename(columns={"MWh/jaar": "gemiddeld_jaarverbruik_mWh"})
@@ -18,7 +20,7 @@ df["kWh_per_m2"] = (
 
 # Convert to Parquet
 df.to_parquet(
-    "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/safe file/data.parquet",
+    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/safe file/data.parquet",
     engine="pyarrow",
     index=False,
 )

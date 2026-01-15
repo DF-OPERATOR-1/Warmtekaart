@@ -6,3 +6,5 @@ core/__pycache__/config.cpython-312.pyc
 .streamlit
 data/data.csv
 .DS_Store
+data/safe file/data.csv
+data/safe file/data_wkt.csv
