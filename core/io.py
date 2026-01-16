@@ -4,6 +4,7 @@ import gzip
 from pathlib import Path
 import re
 import unicodedata
+import math
 
 import orjson
 import pandas as pd
@@ -28,19 +29,112 @@ from .config import (
 # ============================================================
 # GeoJSON loader (met property-filter & coördinaat-precisie)
 # ============================================================
+def _resolve_layer_path(path: Path) -> Path | None:
+    if path.exists():
+        return path
+    candidate = None
+    if path.suffix == ".gz" and path.name.endswith(".geojson.gz"):
+        candidate = path.with_suffix("")
+        candidate = candidate.with_suffix(".parquet")
+    elif path.suffix in {".geojson", ".json"}:
+        candidate = path.with_suffix(".parquet")
+    if candidate and candidate.exists():
+        return candidate
+    return None
+
+
 @st.cache_data(show_spinner=False, max_entries=8, ttl=86400)
 def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, ttl=3600):
     """
-    Laadt een GeoJSON-bestand als dict.
+    Laadt een GeoJSON- of Parquet-bestand als dict.
     - keep_props: lijst met property-namen die je wilt behouden (alles daarbuiten wordt gestript)
     - coord_precision: aantal decimalen voor coördinaten (reductie van bestandsgrootte)
     """
     if not path:
         return None
-    p = Path(path)
-    if not p.exists():
+    p = _resolve_layer_path(Path(path))
+    if not p:
         return None
 
+    if p.suffix == ".parquet":
+        try:
+            from shapely import geometry as _shapely_geom
+            from shapely import wkb as _shapely_wkb
+        except Exception as exc:
+            raise RuntimeError(
+                "shapely is vereist voor het lezen van parquet-lagen."
+            ) from exc
+        df = pd.read_parquet(p)
+        if df.empty:
+            return {"type": "FeatureCollection", "features": []}
+        geom_col = "geometry" if "geometry" in df.columns else None
+        if not geom_col:
+            return None
+        kp = set(keep_props or [])
+        factor = 10**coord_precision
+
+        def _round_coords(obj):
+            if isinstance(obj, (list, tuple)):
+                return [_round_coords(x) for x in obj]
+            if isinstance(obj, float):
+                return int(obj * factor) / factor
+            return obj
+
+        cols = list(df.columns)
+        geom_idx = cols.index(geom_col)
+        prop_indices = [
+            idx
+            for idx, name in enumerate(cols)
+            if name != geom_col and (not kp or name in kp)
+        ]
+
+        def _coerce_prop(value):
+            if value is None:
+                return None
+            if isinstance(value, pd.Timestamp):
+                return value.isoformat()
+            if isinstance(value, (float, int)):
+                if isinstance(value, float) and not math.isfinite(value):
+                    return None
+                return value
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="ignore")
+            if hasattr(value, "item"):
+                try:
+                    value = value.item()
+                except Exception:
+                    return value
+                if isinstance(value, float) and not math.isfinite(value):
+                    return None
+            return value
+
+        feats = []
+        for row in df.itertuples(index=False, name=None):
+            geom_val = row[geom_idx]
+            if geom_val is None:
+                geom = None
+            else:
+                if isinstance(geom_val, memoryview):
+                    geom_val = geom_val.tobytes()
+                if isinstance(geom_val, (bytes, bytearray)):
+                    geom_obj = _shapely_wkb.loads(geom_val)
+                elif hasattr(geom_val, "geom_type"):
+                    geom_obj = geom_val
+                else:
+                    geom_obj = None
+                if geom_obj is None:
+                    geom = None
+                else:
+                    geom = _shapely_geom.mapping(geom_obj)
+                    coords = geom.get("coordinates")
+                    if coords is not None:
+                        geom["coordinates"] = _round_coords(coords)
+            props = {}
+            for idx in prop_indices:
+                key = cols[idx]
+                props[key] = _coerce_prop(row[idx])
+            feats.append({"type": "Feature", "properties": props, "geometry": geom})
+        return {"type": "FeatureCollection", "features": feats}
     if p.suffix == ".gz":
         with gzip.open(p, "rb") as fh:
             raw = fh.read()
@@ -60,7 +154,7 @@ def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, tt
     factor = 10**coord_precision
 
     def _round_coords(obj):
-        if isinstance(obj, list):
+        if isinstance(obj, (list, tuple)):
             return [_round_coords(x) for x in obj]
         if isinstance(obj, float):
             return int(obj * factor) / factor
@@ -143,6 +237,88 @@ def _slugify_name(value: str) -> str:
     return text or "onbekend"
 
 
+def normalize_wegennet_name(value: str | None) -> str:
+    """Normaliseer een woonplaatsnaam naar een bestandsveilige sleutel."""
+    return _slugify_name(str(value or ""))
+
+
+def _wegennet_dir(base_path: Path | None = None) -> Path | None:
+    base = base_path or WEGENNET_PATH
+    if base.is_dir():
+        return base
+    candidates = [
+        base.parent / "wegennet_frl",
+        base.parent / "wegennet",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    return None
+
+
+def _wegennet_base_name(path: Path) -> str:
+    name = path.name
+    for suffix in (".geojson.gz", ".json.gz", ".geojson", ".json", ".parquet"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return path.stem
+
+
+def list_wegennet_woonplaatsen(base_path: Path | None = None) -> list[str]:
+    base_dir = _wegennet_dir(base_path)
+    if not base_dir:
+        return []
+    names: set[str] = set()
+    for path in base_dir.iterdir():
+        if not path.is_file():
+            continue
+        if path.suffix == ".parquet" or path.name.endswith(
+            (".geojson.gz", ".json.gz", ".geojson", ".json")
+        ):
+            base_name = _wegennet_base_name(path)
+            if base_name:
+                names.add(base_name)
+    return sorted(names)
+
+
+def resolve_wegennet_paths(
+    woonplaatsen: list[str] | None, base_path: Path | None = None
+) -> list[Path]:
+    if not woonplaatsen:
+        return []
+    base_dir = _wegennet_dir(base_path)
+    if not base_dir:
+        return []
+
+    available: dict[str, tuple[int, Path]] = {}
+
+    def _add(path: Path, priority: int) -> None:
+        key = normalize_wegennet_name(_wegennet_base_name(path))
+        if not key:
+            return
+        if key not in available or priority < available[key][0]:
+            available[key] = (priority, path)
+
+    for path in base_dir.iterdir():
+        if not path.is_file():
+            continue
+        name_lower = path.name.lower()
+        if path.suffix == ".parquet":
+            _add(path, 0)
+        elif name_lower.endswith((".geojson.gz", ".json.gz")):
+            _add(path, 1)
+        elif name_lower.endswith((".geojson", ".json")):
+            _add(path, 2)
+
+    resolved: list[Path] = []
+    for woonplaats in woonplaatsen:
+        key = normalize_wegennet_name(woonplaats)
+        entry = available.get(key)
+        if entry:
+            resolved.append(entry[1])
+    return resolved
+
+
 def resolve_wegennet_path(gemeente: str | None, base_path: Path | None = None) -> Path:
     """Kies een gemeente-specifiek wegennetbestand als dat bestaat."""
     base = base_path or WEGENNET_PATH
@@ -162,6 +338,9 @@ def resolve_wegennet_path(gemeente: str | None, base_path: Path | None = None) -
     for val in variants:
         candidates.append(base_dir / f"wegennet_{val}{suffix}")
         candidates.append(base_dir / "wegennet" / f"{val}{suffix}")
+        candidates.append(base_dir / f"wegennet_{val}.parquet")
+        candidates.append(base_dir / "wegennet" / f"{val}.parquet")
+        candidates.append(base_dir / "wegennet_frl" / f"{val}.parquet")
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -173,9 +352,25 @@ def geojson_unique_props(path: str | Path, prop_name: str) -> list[str]:
     """Lees unieke property-waarden uit een GeoJSON (zonder extra bewerkingen)."""
     if not path:
         return []
-    p = Path(path)
-    if not p.exists():
+    p = _resolve_layer_path(Path(path))
+    if not p:
         return []
+
+    if p.suffix == ".parquet":
+        try:
+            df = pd.read_parquet(p, columns=[prop_name])
+        except Exception:
+            return []
+        if prop_name not in df.columns:
+            return []
+        values = set()
+        for val in df[prop_name]:
+            if val is None or (isinstance(val, float) and not math.isfinite(val)):
+                continue
+            txt = str(val).strip()
+            if txt:
+                values.add(txt)
+        return sorted(values)
 
     if p.suffix == ".gz":
         with gzip.open(p, "rb") as fh:

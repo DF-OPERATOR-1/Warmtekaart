@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import io
+import shutil
 import tempfile
 import textwrap
 from datetime import datetime
@@ -37,6 +38,7 @@ _STIJL = {
     "dpi": 300,  # Standaard DPI voor PDF-rendering.
 }
 _MAX_IMAGE_DPI = 300  # Max DPI voor ingesloten afbeeldingen om RAM te beperken.
+_JPEG_QUALITY = 80
 _TABEL_REGEL_AFSTAND = 1.5  # Regelafstand binnen tabelceltekst.
 _TABEL_LETTERGROOTTE = _STIJL["body_size"] + 1  # Lettergrootte voor tabellen.
 _TABEL_RIJ_HOOGTE = (_TABEL_LETTERGROOTTE / 72) / _STIJL["page_portrait"][1]  # Basisrijhoogte.
@@ -718,53 +720,29 @@ def _build_warmtenet_report_tables(
     def _fmt_euro_only(value) -> str:
         return _format_series(pd.Series([value]), 0, prefix="€ ").iloc[0]
 
-    out_leidingen = pd.concat(
-        [
-            pd.DataFrame(
-                {
-                    "Woonplaats": merged["woonplaats_display"],
-                    "Type": "Vraag",
-                    "Kosten netwerk": [
-                        _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
-                        for v_len, v_cost in zip(wegennet_lengte_m, kosten_net_wegennet)
-                    ],
-                    "Kosten aansluiting": [
-                        _fmt_len_cost(
-                            v_len, v_cost, "Aansluiting (m)", "Kosten"
-                        )
-                        for v_len, v_cost in zip(wegennet_conn_m, kosten_conn_wegennet)
-                    ],
-                    "Totale kosten": [
-                        _fmt_euro_only(v) for v in kosten_tot_wegennet
-                    ],
-                }
-            ),
-            pd.DataFrame(
-                {
-                    "Woonplaats": merged["woonplaats_display"],
-                    "Type": "Bron",
-                    "Kosten netwerk": [
-                        _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
-                        for v_len, v_cost in zip(
-                            warmtenet_lengte_m, kosten_net_warmtebron
-                        )
-                    ],
-                    "Kosten aansluiting": [
-                        _fmt_len_cost(
-                            v_len, v_cost, "Aansluiting (m)", "Kosten"
-                        )
-                        for v_len, v_cost in zip(
-                            warmtenet_conn_m, kosten_conn_warmtebron
-                        )
-                    ],
-                    "Totale kosten": [
-                        _fmt_euro_only(v) for v in kosten_tot_warmtebron
-                    ],
-                }
-            ),
-        ],
-        ignore_index=True,
-    ).sort_values(["Woonplaats", "Type"])
+    out_leidingen = pd.DataFrame(
+        {
+            "Woonplaats": merged["woonplaats_display"],
+            "Type": "Bron",
+            "Kosten netwerk": [
+                _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
+                for v_len, v_cost in zip(
+                    warmtenet_lengte_m, kosten_net_warmtebron
+                )
+            ],
+            "Kosten aansluiting": [
+                _fmt_len_cost(
+                    v_len, v_cost, "Aansluiting (m)", "Kosten"
+                )
+                for v_len, v_cost in zip(
+                    warmtenet_conn_m, kosten_conn_warmtebron
+                )
+            ],
+            "Totale kosten": [
+                _fmt_euro_only(v) for v in kosten_tot_warmtebron
+            ],
+        }
+    ).sort_values("Woonplaats")
 
     return out_warmte, out_panden, out_leidingen
 
@@ -843,7 +821,7 @@ def _select_dpi(value: Any) -> int:
         dpi = int(round(float(value)))
     except Exception:
         return _STIJL["dpi"]
-    return max(150, min(dpi, 600))
+    return dpi
 
 
 def _format_dutch_month_year(dt: datetime) -> str:
@@ -978,6 +956,163 @@ def prepare_report_image_bytes(
     return encoded or image_bytes
 
 
+def write_bytes_to_tempfile(data: bytes, suffix: str) -> str:
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp_file.write(data)
+        tmp_file.flush()
+    finally:
+        tmp_file.close()
+    return tmp_file.name
+
+
+def transcode_to_jpeg(in_path: str, out_path: str, quality: int = _JPEG_QUALITY) -> str:
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("Pillow is vereist voor JPEG-transcoding.") from exc
+    with Image.open(in_path) as img:
+        if img.mode in ("RGBA", "LA") or (
+            img.mode == "P" and "transparency" in img.info
+        ):
+            alpha = img.convert("RGBA")
+            bg = Image.new("RGB", alpha.size, (255, 255, 255))
+            bg.paste(alpha, mask=alpha.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(
+            out_path,
+            format="JPEG",
+            quality=quality,
+            optimize=True,
+            progressive=True,
+        )
+    return out_path
+
+
+def embed_image_in_pdf(
+    canvas,
+    img_path: str,
+    dpi_user: int,
+    *,
+    box: tuple[float, float, float, float],
+    fit: str = "contain",
+) -> None:
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("Pillow is vereist voor PDF-embedding.") from exc
+    with Image.open(img_path) as img:
+        px_w, px_h = img.size
+    if not px_w or not px_h:
+        return
+    dpi_safe = dpi_user if dpi_user and dpi_user > 0 else _STIJL["dpi"]
+    width_pt = (px_w / dpi_safe) * 72.0
+    height_pt = (px_h / dpi_safe) * 72.0
+    if width_pt <= 0 or height_pt <= 0:
+        return
+    box_x, box_y, box_w, box_h = box
+    if fit == "cover":
+        scale = max(box_w / width_pt, box_h / height_pt)
+    elif fit == "contain":
+        scale = min(box_w / width_pt, box_h / height_pt, 1.0)
+    else:
+        scale = 1.0
+    draw_w = width_pt * scale
+    draw_h = height_pt * scale
+    x = box_x + (box_w - draw_w) / 2
+    y = box_y + (box_h - draw_h) / 2
+    if fit == "cover":
+        canvas.saveState()
+        path = canvas.beginPath()
+        path.rect(box_x, box_y, box_w, box_h)
+        canvas.clipPath(path, stroke=0, fill=0)
+        canvas.drawImage(img_path, x, y, width=draw_w, height=draw_h)
+        canvas.restoreState()
+    else:
+        canvas.drawImage(img_path, x, y, width=draw_w, height=draw_h)
+
+
+def _overlay_map_image_on_pdf(
+    base_pdf_path: Path,
+    map_image_path: str,
+    dpi_user: int,
+    summary_page_index: int | None,
+    map_page_index: int | None,
+) -> None:
+    if not map_image_path or (
+        summary_page_index is None and map_page_index is None
+    ):
+        return
+    if not Path(map_image_path).exists():
+        return
+    try:
+        from reportlab.pdfgen import canvas
+    except Exception as exc:
+        raise RuntimeError("reportlab is vereist voor PDF-embedding.") from exc
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception as exc:
+        raise RuntimeError("pypdf is vereist voor PDF-embedding.") from exc
+    base_reader = PdfReader(str(base_pdf_path))
+    overlay_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    overlay_path = overlay_tmp.name
+    overlay_tmp.close()
+    c = canvas.Canvas(overlay_path)
+    for idx, page in enumerate(base_reader.pages):
+        width_pt = float(page.mediabox.width)
+        height_pt = float(page.mediabox.height)
+        c.setPageSize((width_pt, height_pt))
+        if summary_page_index is not None and idx == summary_page_index:
+            map_cfg = _SAMENVATTING_INDELING["map"]
+            box = (
+                map_cfg["x"] * width_pt,
+                map_cfg["y"] * height_pt,
+                map_cfg["w"] * width_pt,
+                map_cfg["h"] * height_pt,
+            )
+            embed_image_in_pdf(
+                c,
+                map_image_path,
+                dpi_user,
+                box=box,
+                fit="cover",
+            )
+        if map_page_index is not None and idx == map_page_index:
+            box = (
+                _STIJL["margin_left"] * width_pt,
+                0.08 * height_pt,
+                0.88 * width_pt,
+                0.8 * height_pt,
+            )
+            embed_image_in_pdf(
+                c,
+                map_image_path,
+                dpi_user,
+                box=box,
+                fit="contain",
+            )
+        c.showPage()
+    c.save()
+    try:
+        overlay_reader = PdfReader(overlay_path)
+        writer = PdfWriter()
+        for idx, page in enumerate(base_reader.pages):
+            if idx < len(overlay_reader.pages):
+                page.merge_page(overlay_reader.pages[idx])
+            writer.add_page(page)
+        with open(base_pdf_path, "wb") as handle:
+            writer.write(handle)
+    finally:
+        try:
+            Path(overlay_path).unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+
 def _as_schaal(ax, x: float, y: float, width: float, height: float) -> tuple[float, float]:
     try:
         (x0, y0) = ax.transData.transform((x, y))
@@ -1102,6 +1237,7 @@ def _render_summary_page(
     map_image: bytes | None,
     background: Path | None = None,
     image_max_side_px: int | None = None,
+    show_missing_map_text: bool = True,
 ):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
@@ -1189,7 +1325,7 @@ def _render_summary_page(
                 ha="center",
                 va="center",
             )
-    else:
+    elif show_missing_map_text:
         ax.text(
             map_left + map_width / 2,
             map_bottom + map_height / 2,
@@ -1863,7 +1999,11 @@ def _draw_table_on_ax(
 
 
 def _render_image_page(
-    title: str, image_bytes: bytes, *, image_max_side_px: int | None = None
+    title: str,
+    image_bytes: bytes | None,
+    *,
+    image_max_side_px: int | None = None,
+    show_missing_text: bool = True,
 ):
     plt, _ = _lazy_matplotlib()
     _apply_report_style(plt)
@@ -1896,13 +2036,14 @@ def _render_image_page(
         ax.imshow(img, interpolation="lanczos")
         ax.set_aspect("equal", adjustable="box")
     except Exception:
-        ax.text(
-            0.02,
-            0.5,
-            "Kaartafbeelding kon niet worden geladen.",
-            fontsize=_STIJL["body_size"],
-            va="center",
-        )
+        if show_missing_text:
+            ax.text(
+                0.02,
+                0.5,
+                "Kaartafbeelding kon niet worden geladen.",
+                fontsize=_STIJL["body_size"],
+                va="center",
+            )
     return fig
 
 
@@ -1915,7 +2056,7 @@ def build_report_pdf(
     warmtenet_gjson: dict | None = None,
     heat_unit: str | None = None,
     threshold_display: float | None = None,
-    map_image: bytes | None = None,
+    map_image_path: str | None = None,
     pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
     pandtype_mwh_by_woonplaats: pd.DataFrame | None = None,
     report_title: str = "Friese Warmteatlas",
@@ -1937,7 +2078,9 @@ def build_report_pdf(
         else ui.get("threshold_display", ui.get("threshold", ""))
     )
     dpi = _select_dpi(ui.get("report_dpi"))
-    image_max_side_px = _max_page_side_px(min(dpi, _MAX_IMAGE_DPI))
+    image_max_side_px = _max_page_side_px(dpi)
+    if map_image_path and not Path(map_image_path).exists():
+        map_image_path = None
     participatie_pct = ui.get("participatie", 0)
     records, totaal_panden, totaal_mwh, panden_part, mwh_part = _compute_totals(
         df_filtered, participatie_pct
@@ -2053,6 +2196,8 @@ def build_report_pdf(
     ]
 
     page_num = 0
+    summary_page_index = None
+    map_page_index = None
     warmtenet_tables = None
     if layer_state.get("warmtenet") and layer_state.get("wegennet"):
         warmtenet_tables = _build_warmtenet_report_tables(
@@ -2077,11 +2222,14 @@ def build_report_pdf(
         if _SAMENVATTING_ACHTERGROND.exists():
             fig = _render_summary_page(
                 kpis=kpi_items,
-                map_image=map_image,
+                map_image=None,
                 background=_SAMENVATTING_ACHTERGROND,
                 image_max_side_px=image_max_side_px,
+                show_missing_map_text=not map_image_path,
             )
             page_num += 1
+            if map_image_path:
+                summary_page_index = page_num - 1
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
             _close_figure(fig, plt)
@@ -2091,11 +2239,15 @@ def build_report_pdf(
             _add_page_number(fig, page_num)
             pdf.savefig(fig, dpi=dpi)
             _close_figure(fig, plt)
-            if map_image:
+            if map_image_path:
                 fig = _render_image_page(
-                    "Kaart", map_image, image_max_side_px=image_max_side_px
+                    "Kaart",
+                    None,
+                    image_max_side_px=image_max_side_px,
+                    show_missing_text=False,
                 )
                 page_num += 1
+                map_page_index = page_num - 1
                 _add_page_number(fig, page_num)
                 pdf.savefig(fig, dpi=dpi)
                 _close_figure(fig, plt)
@@ -2587,5 +2739,34 @@ def build_report_pdf(
         _add_page_number(fig, page_num)
         pdf.savefig(fig, dpi=dpi)
         _close_figure(fig, plt)
+
+    if map_image_path:
+        snapshot_png_file = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=Path(map_image_path).suffix or ".png",
+        )
+        snapshot_png = snapshot_png_file.name
+        snapshot_png_file.close()
+        snapshot_jpg_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        snapshot_jpg = snapshot_jpg_file.name
+        snapshot_jpg_file.close()
+        try:
+            shutil.copyfile(map_image_path, snapshot_png)
+            transcode_to_jpeg(snapshot_png, snapshot_jpg, quality=_JPEG_QUALITY)
+            _overlay_map_image_on_pdf(
+                tmp_path,
+                snapshot_jpg,
+                dpi,
+                summary_page_index,
+                map_page_index,
+            )
+        finally:
+            for path in (snapshot_png, snapshot_jpg):
+                try:
+                    Path(path).unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    pass
 
     return str(tmp_path)

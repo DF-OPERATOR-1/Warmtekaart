@@ -12,7 +12,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core.config import LAYER_CFG, BASEMAP_CFG
-from core.io import resolve_wegennet_path, geojson_unique_props
+from core.io import (
+    resolve_wegennet_path,
+    geojson_unique_props,
+    list_wegennet_woonplaatsen,
+    normalize_wegennet_name,
+)
+from core.report import write_bytes_to_tempfile
 from core.utils import (
     format_dutch_number,
     get_dynamic_resolution,
@@ -439,15 +445,14 @@ def build_sidebar(
                 "MWh/ha": "MWh/ha (grondoppervlakte)",
                 "kWh/m²": "kWh/m² (gebruiksoppervlakte)",
             }
-            heat_unit_default = st.session_state.get("heat_unit", heat_unit_options[0])
+            heat_unit_default = st.session_state.get("heat_unit", default_unit)
             if heat_unit_default not in heat_unit_options:
-                heat_unit_default = heat_unit_options[0]
+                heat_unit_default = default_unit
                 st.session_state["heat_unit"] = heat_unit_default
             heat_unit = st.radio(
                 "Eenheid warmtevraag",
                 options=heat_unit_options,
                 format_func=lambda v: heat_unit_labels.get(v, v),
-                index=heat_unit_options.index(heat_unit_default),
                 horizontal=True,
                 key="heat_unit",
                 on_change=lambda: st.session_state.__setitem__("heat_unit_auto", False),
@@ -826,8 +831,12 @@ def build_sidebar(
                             if geselecteerde_gemeenten
                             else ""
                         )
-                        wegennet_path = resolve_wegennet_path(gemeente_naam)
-                        wp_options = geojson_unique_props(wegennet_path, "area_name")
+                        wp_options = list_wegennet_woonplaatsen()
+                        if not wp_options:
+                            wegennet_path = resolve_wegennet_path(gemeente_naam)
+                            wp_options = geojson_unique_props(
+                                wegennet_path, "area_name"
+                            )
                     if (
                         "gemeentenaam" in df_in.columns
                         and len(geselecteerde_gemeenten) == 1
@@ -843,7 +852,14 @@ def build_sidebar(
                             for w in df_in.loc[mask, "woonplaats"].dropna().unique()
                         }
                         if allowed_wp:
-                            wp_options = [w for w in wp_options if w in allowed_wp]
+                            allowed_norm = {
+                                normalize_wegennet_name(w) for w in allowed_wp
+                            }
+                            wp_options = [
+                                w
+                                for w in wp_options
+                                if normalize_wegennet_name(w) in allowed_norm
+                            ]
 
                     if not wp_options:
                         if no_data_warning:
@@ -863,11 +879,14 @@ def build_sidebar(
                             for w in st.session_state.get("wegennet_wp_selectie", [])
                             if w in wp_options
                         ]
+                        option_by_norm = {
+                            normalize_wegennet_name(w): w for w in wp_options
+                        }
                         base_default = [
-                            w
+                            option_by_norm.get(normalize_wegennet_name(w))
                             for w in st.session_state.get("woonplaats_selectie", [])
-                            if w in wp_options
                         ]
+                        base_default = [w for w in base_default if w in wp_options]
                         sync_sig = tuple(base_default)
                         if st.session_state.get("_wegennet_wp_sync") != sync_sig:
                             st.session_state["wegennet_wp_selectie"] = list(
@@ -875,11 +894,18 @@ def build_sidebar(
                             )
                             st.session_state["_wegennet_wp_sync"] = sync_sig
                         default_wp = prev_wp or base_default or wp_options
+                        def _format_woonplaats_label(value: str) -> str:
+                            cleaned = value.replace("_", " ").strip()
+                            if cleaned.islower():
+                                return cleaned.title()
+                            return cleaned
+
                         wp_selectie = st.multiselect(
                             "Filter op woonplaats",
                             options=wp_options,
                             default=default_wp,
                             key="wegennet_wp_selectie",
+                            format_func=_format_woonplaats_label,
                         )
                         ui["wegennet_wp_selectie"] = wp_selectie
 
@@ -1435,7 +1461,6 @@ def build_sidebar(
 
             def _clear_report_cache():
                 _cleanup_report_file()
-                st.session_state["report_pdf"] = None
                 st.session_state["report_filename"] = None
                 st.session_state["report_requested"] = False
                 st.session_state["report_map_image_error"] = None
@@ -1499,33 +1524,53 @@ def build_sidebar(
                 key=f"report_map_upload_{upload_key}",
                 label_visibility="collapsed",
             )
+
+            def _cleanup_report_map_image():
+                map_path = st.session_state.get("report_map_image_path")
+                if map_path:
+                    try:
+                        Path(map_path).unlink()
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+                st.session_state["report_map_image_path"] = None
+
             if uploaded is not None:
                 uploaded_bytes = uploaded.getvalue()
                 upload_sig = (uploaded.name, len(uploaded_bytes))
                 if st.session_state.get("report_map_image_sig") != upload_sig:
-                    st.session_state["report_map_image"] = uploaded_bytes
+                    _cleanup_report_map_image()
+                    suffix = Path(uploaded.name).suffix or ".png"
+                    st.session_state["report_map_image_path"] = write_bytes_to_tempfile(
+                        uploaded_bytes,
+                        suffix=suffix,
+                    )
                     st.session_state["report_map_image_name"] = uploaded.name
                     st.session_state["report_map_image_sig"] = upload_sig
                     st.session_state["report_image_uploaded"] = True
                     _clear_report_cache()
+                del uploaded_bytes
             elif st.session_state.get("report_map_image_sig"):
-                st.session_state["report_map_image"] = None
+                _cleanup_report_map_image()
                 st.session_state["report_map_image_name"] = None
                 st.session_state["report_map_image_sig"] = None
+                st.session_state["report_image_uploaded"] = False
                 st.session_state["report_upload_key"] = upload_key + 1
                 _clear_report_cache()
-            map_image = st.session_state.get("report_map_image")
+            map_image = st.session_state.get("report_map_image_path")
             map_image_name = st.session_state.get("report_map_image_name") or "kaart.png"
             report_image_error = st.session_state.get("report_map_image_error")
             if report_image_error:
                 st.error(report_image_error)
-            if map_image:
+            if map_image and Path(map_image).exists():
                 st.caption(f"Afbeelding klaar: {map_image_name}")
                 st.image(map_image, caption="Preview kaart", width="stretch")
                 if st.button("Verwijder kaartafbeelding", key="report_map_clear"):
-                    st.session_state["report_map_image"] = None
+                    _cleanup_report_map_image()
                     st.session_state["report_map_image_name"] = None
                     st.session_state["report_map_image_sig"] = None
+                    st.session_state["report_image_uploaded"] = False
                     st.session_state["report_upload_key"] = upload_key + 1
                     _clear_report_cache()
                     st.rerun()

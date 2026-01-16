@@ -8,3 +8,10 @@ data/data.csv
 .DS_Store
 data/safe file/data.csv
 data/safe file/data_wkt.csv
+data/safe file/waterlichamen_potentie_extraqt.geojson.gz
+data/safe file/wegennet_frl.geojson.gz
+data/safe file/buurt_potentie_extraqt.geojson.gz
+data/safe file/energiearmoede_frl.geojson.gz
+data/safe file/koopwoningen_frl.geojson.gz
+data/safe file/wooncorporatie_frl.geojson.gz
+data/safe file/warmtenet_full.geojson.gz

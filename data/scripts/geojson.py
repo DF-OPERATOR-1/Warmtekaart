@@ -26,6 +26,26 @@ with open(input_file, "rb") as f_in:
     with gzip.open(output_file, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
 
+# %% geojson.gz to parquet
+import geopandas as gpd
+INPUT = "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson.gz"
+OUTPUT = "warmtenet_full.parquet"
+
+# Gebruik GDAL gzip virtual filesystem
+INPUT_VSI = f"/vsigzip/{INPUT}"
+
+print("Reading GeoJSON.gz...")
+gdf = gpd.read_file(INPUT_VSI, engine="pyogrio")
+
+print("Writing GeoParquet...")
+gdf.to_parquet(
+    OUTPUT,
+    compression="zstd",
+    index=False
+)
+
+print("Done.")
+
 # %% Geopackage converter
 import geopandas as gpd
 
