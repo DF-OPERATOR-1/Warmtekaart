@@ -1304,6 +1304,10 @@ if should_compute:
                     show_wegennet=bool(ui.get("show_wegennet")),
                     warmtenet_wp=ui.get("warmtenet_wp_selectie", []),
                     wegennet_wp=ui.get("wegennet_wp_selectie", []),
+                    zoom_level=ui.get("zoom_level"),
+                    min_zoom_wegennet=int(
+                        LAYER_CFG.get("wegennet", {}).get("min_zoom", 11)
+                    ),
                 )
             st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):

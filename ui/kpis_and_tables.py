@@ -669,6 +669,21 @@ def _render_warmtenet_comparison(
         kosten_bron_warmtebron + kosten_conn_warmtebron
     )
 
+    st.caption(
+        "**Warmtebronnen:** deze weergave laat zien hoe een warmtenet eruit kan zien "
+        "wanneer warmte vanuit een bron wordt verdeeld binnen de woonplaats. Het "
+        "model legt leidingen langs het wegennet en kiest daarbij verbindingen met "
+        "zo laag mogelijk kosten om de warmtevraag te bedienen."
+    )
+    st.caption(
+        "**Warmtevraag:** deze weergave laat zien hoe een warmtenet eruit zou zien "
+        "wanneer alle panden binnen de woonplaats worden aangesloten op basis van "
+        "de warmtevraag. De leidingen volgen het wegennet, maar zijn niet "
+        "geoptimaliseerd op kosten of haalbaarheid. Deze weergave geeft inzicht "
+        "in wat er aanvullend nodig zou zijn ten opzichte van de getoonde "
+        "warmtebronnen."
+    )
+
     tab_warmte, tab_panden, tab_leidingen = st.tabs(
         ["Warmtevraag", "Panden", "Leidingen & kosten"]
     )
@@ -792,6 +807,8 @@ def render_tabs(
     show_wegennet: bool = False,
     warmtenet_wp: list[str] | None = None,
     wegennet_wp: list[str] | None = None,
+    zoom_level: int | None = None,
+    min_zoom_wegennet: int = 11,
 ):
     """
     Tabs:
@@ -804,8 +821,14 @@ def render_tabs(
     else:
         sites_costed_df = sites_costed
 
-    show_comparison_tab = bool(show_warmtenet or show_wegennet)
+    zoom_ok = (zoom_level is None) or (int(zoom_level) >= int(min_zoom_wegennet))
+    show_comparison_tab = True
     show_comparison = bool(show_warmtenet and show_wegennet)
+    warning_text = (
+        "Schakel warmtebronnen en warmtevraag in om dekking (%), "
+        "onbenutte warmte (MWh) en kosten te bekijken. Alleen beschikbaar "
+        f"vanaf zoomniveau {min_zoom_wegennet}."
+    )
     tab_labels = ["Top woonplaatsen (MWh)"]
     if show_comparison_tab:
         tab_labels.append("Warmtenet inzicht")
@@ -912,15 +935,14 @@ def render_tabs(
     # --- TAB 2: Warmtenet inzicht ---
     if show_comparison_tab:
         with tabs[tab_idx]:
-            if show_comparison:
+            if not zoom_ok:
+                st.warning(warning_text)
+            elif show_comparison:
                 _render_warmtenet_comparison(
                     warmtenet_gjson, warmtenet_wp, wegennet_wp, df_filtered
                 )
             else:
-                st.warning(
-                    "Zet warmtebronnen en warmtevraag aan om dekking (%), "
-                    "onbenut (MWh) en kosten te tonen."
-                )
+                st.warning(warning_text)
         tab_idx += 1
 
     # --- TAB 3: Kandidaat-voorzieningen ---

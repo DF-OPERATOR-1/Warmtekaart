@@ -236,7 +236,7 @@ def _render_big_legend(
     st.markdown(legend_html, unsafe_allow_html=True)
     if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
         with st.expander("Uitleg legenda"):
-            st.markdown(info_text)
+            st.caption(info_text)
 
 
 # ---------------------------
@@ -519,6 +519,15 @@ def build_sidebar(
                 value=False,
                 key=LAYER_CFG["warmtenet_model"]["toggle_key"],
             )
+            if show_warmtenet:
+                with st.expander("Uitleg", expanded=False):
+                    st.caption(
+                        "**Warmtebronnen:** deze weergave laat zien hoe een warmtenet eruit "
+                        "kan zien wanneer warmte vanuit een bron wordt verdeeld binnen "
+                        "de woonplaats. Het model legt leidingen langs het wegennet en "
+                        "kiest daarbij verbindingen met zo laag mogelijk kosten om de "
+                        "warmtevraag te bedienen."
+                    )
             show_wegennet = st.toggle(
                 "Warmtevraag",
                 value=False,
@@ -527,15 +536,22 @@ def build_sidebar(
             ui["show_warmtenet_model"] = show_warmtenet
             ui["show_wegennet"] = show_wegennet
             if not (show_warmtenet and show_wegennet):
+                min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
                 st.warning(
-                    "Zet warmtebronnen en warmtevraag aan om dekking (%), "
-                    "onbenut (MWh) en kosten te tonen."
+                    "Schakel warmtebronnen en warmtevraag in om dekking (%), "
+                    "onbenutte warmte (MWh) en kosten te bekijken. Alleen beschikbaar "
+                    f"vanaf zoomniveau {min_zoom}."
                 )
             if show_wegennet:
-                st.warning(
-                    "De weergegeven leidingen zijn een eerste verkenning en kunnen "
-                    "trajecten bevatten die in de praktijk niet haalbaar blijken."
-                )
+                with st.expander("Uitleg", expanded=False):
+                    st.caption(
+                        "**Warmtevraag:** deze weergave laat zien hoe een warmtenet eruit "
+                        "zou zien wanneer alle panden binnen de woonplaats worden "
+                        "aangesloten op basis van de warmtevraag. De leidingen volgen "
+                        "het wegennet, maar zijn niet geoptimaliseerd op kosten of "
+                        "haalbaarheid. Deze weergave geeft inzicht in wat er aanvullend "
+                        "nodig zou zijn ten opzichte van de getoonde warmtebronnen."
+                    )
             auto_blocked_water_pot = False
             water_pot_key = LAYER_CFG["water_potentie"]["toggle_key"]
             selected_gemeenten = st.session_state.get("gemeente_selectie", [])
@@ -743,7 +759,7 @@ def build_sidebar(
                 st.markdown("**Onderdelen warmtevraag**")
                 if zoom_level < min_zoom:
                     st.info(
-                        f"Wegennetten worden pas getoond vanaf zoomniveau {min_zoom}."
+                        f"Warmtenet op basis van warmtevraag wordt pas getoond vanaf zoomniveau {min_zoom}."
                     )
                 else:
                     geselecteerde_gemeenten = st.session_state.get(
