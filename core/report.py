@@ -61,6 +61,7 @@ _ASSET_MAP = Path(__file__).resolve().parents[1] / "assets" / "report"  # Rappor
 _VOORBLAD_ACHTERGROND = _ASSET_MAP / "Voorblad.png"  # Achtergrond voor het voorblad.
 _SAMENVATTING_ACHTERGROND = _ASSET_MAP / "Samenvatting.png"  # Achtergrond voor samenvatting.
 _WOONPLAATSEN_ACHTERGROND = _ASSET_MAP / "Woonplaatsen.png"  # Achtergrond top woonplaatsen.
+_WOONPLAATSEN_PAND_ACHTERGROND = _ASSET_MAP / "Woonplaatsen_pand.png"
 _WARMTENET_VRAAG_ACHTERGROND = _ASSET_MAP / "Warmtenet_vraag.png"
 _WARMTENET_PANDEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_panden.png"
 _WARMTENET_KOSTEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_kosten.png"
@@ -89,7 +90,10 @@ _SAMENVATTING_INDELING = {
     "map": {"x": 0.1070, "y": 0.105, "w": 0.7908, "h": 0.515},  # Kaartkader (bbox).
 }
 _WOONPLAATSEN_INDELING = {
-    "table_bbox": [0.10, 0.18, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
+    "table_bbox": [0.10, 0.16, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
+}
+_WOONPLAATSEN_PAND_INDELING = {
+    "table_bbox": [0.10, 0.16, 0.80, 0.66],
 }
 _WARMTENET_INDELING = {
     "table_bbox": [0.10, 0.14, 0.80, 0.66],  # Tabelkader (bbox) [x, y, w, h].
@@ -1253,7 +1257,10 @@ def _compute_totals(
 
 
 def _build_top_woonplaatsen_table(
-    df_filtered: pd.DataFrame, *, top_n: int = 15
+    df_filtered: pd.DataFrame,
+    pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
+    *,
+    top_n: int = 15,
 ) -> pd.DataFrame:
     if df_filtered is None or df_filtered.empty:
         return pd.DataFrame()
@@ -1296,8 +1303,8 @@ def _build_top_woonplaatsen_table(
         .sort_values("MWh", ascending=False)
         .head(top_n)
     )
-    out_cols = ["Woonplaats", "MWh"]
     top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
+    out_cols = ["Woonplaats", "MWh"]
     if use_area and col_area in top_wp.columns:
         top_wp["Warmtevraag per ha (MWh)"] = top_wp["MWh"].div(
             top_wp[col_area].replace(0, pd.NA)
@@ -1307,12 +1314,116 @@ def _build_top_woonplaatsen_table(
     elif density_source == "col" and col_density in top_wp.columns:
         top_wp.rename(columns={col_density: "Warmtevraag per ha (MWh)"}, inplace=True)
         out_cols.append("Warmtevraag per ha (MWh)")
+
+    type_col_woningen = "Woningen"
+    type_col_bedrijven = "Bedrijven"
+    if (
+        isinstance(pandtype_counts_by_woonplaats, pd.DataFrame)
+        and not pandtype_counts_by_woonplaats.empty
+        and "woonplaats" in pandtype_counts_by_woonplaats.columns
+    ):
+        counts_wp = pandtype_counts_by_woonplaats.loc[
+            :, ["woonplaats", "woningen", "bedrijven"]
+        ].copy()
+        counts_wp["woonplaats_norm"] = counts_wp["woonplaats"].map(
+            _normalize_woonplaats
+        )
+        top_wp["woonplaats_norm"] = top_wp["Woonplaats"].map(_normalize_woonplaats)
+        top_wp = top_wp.merge(
+            counts_wp[["woonplaats_norm", "woningen", "bedrijven"]],
+            on="woonplaats_norm",
+            how="left",
+        )
+        top_wp.drop(columns=["woonplaats_norm"], inplace=True)
+        top_wp.rename(
+            columns={
+                "woningen": type_col_woningen,
+                "bedrijven": type_col_bedrijven,
+            },
+            inplace=True,
+        )
+        ordered_cols = ["Woonplaats", "MWh", type_col_woningen, type_col_bedrijven]
+        if "Oppervlakte (ha)" in top_wp.columns:
+            ordered_cols.append("Oppervlakte (ha)")
+        if "Warmtevraag per ha (MWh)" in top_wp.columns:
+            ordered_cols.append("Warmtevraag per ha (MWh)")
+        out_cols = [c for c in ordered_cols if c in top_wp.columns]
+
     for col in top_wp.columns:
         if col == "MWh":
+            top_wp[col] = top_wp[col].map(_fmt_int)
+        elif col in (type_col_woningen, type_col_bedrijven):
             top_wp[col] = top_wp[col].map(_fmt_int)
         elif col in ("Oppervlakte (ha)", "Warmtevraag per ha (MWh)"):
             top_wp[col] = top_wp[col].map(lambda v: _fmt_float(v, 2))
     return top_wp.loc[:, [c for c in out_cols if c in top_wp.columns]]
+
+
+def _build_top_woonplaatsen_pand_table(
+    pandtype_mwh_by_woonplaats: pd.DataFrame | None,
+    top_wp: pd.DataFrame | None = None,
+    *,
+    top_n: int = 15,
+) -> pd.DataFrame:
+    if pandtype_mwh_by_woonplaats is None or pandtype_mwh_by_woonplaats.empty:
+        return pd.DataFrame()
+    breakdown = pandtype_mwh_by_woonplaats.copy()
+    if "woonplaats" not in breakdown.columns or "type_code" not in breakdown.columns:
+        return pd.DataFrame()
+    if top_wp is not None and "Woonplaats" in top_wp.columns:
+        top_norms = top_wp["Woonplaats"].map(_normalize_woonplaats)
+        top_order_map = {wp_norm: idx for idx, wp_norm in enumerate(top_norms)}
+        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(_normalize_woonplaats)
+        breakdown = breakdown[breakdown["woonplaats_norm"].isin(set(top_norms))]
+        breakdown["top_rank"] = breakdown["woonplaats_norm"].map(top_order_map)
+    else:
+        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(_normalize_woonplaats)
+        breakdown = breakdown.sort_values("woonplaats_norm").head(top_n * 3)
+        breakdown["top_rank"] = (
+            breakdown["woonplaats_norm"].factorize(sort=True)[0].astype(int)
+        )
+
+    if breakdown.empty:
+        return pd.DataFrame()
+
+    type_map = {
+        "A": "A - Woningen",
+        "B": "B - Bedrijven",
+        "C": "C - Woningen en bedrijven",
+    }
+    breakdown["Type pand"] = breakdown["type_code"].map(type_map).fillna(
+        breakdown["type_code"]
+    )
+    breakdown["Woonplaats"] = breakdown["woonplaats"].astype(str).str.strip()
+    breakdown["type_order"] = breakdown["type_code"].map({"A": 0, "B": 1, "C": 2})
+    breakdown["type_order"] = breakdown["type_order"].fillna(9)
+
+    sort_cols = ["top_rank", "type_order"]
+    breakdown.sort_values(sort_cols, inplace=True)
+
+    rename_map = {"aantal_panden": "Panden"}
+    if "area_ha" in breakdown.columns:
+        rename_map["area_ha"] = "Oppervlakte (ha)"
+    if "MWh_per_ha" in breakdown.columns:
+        rename_map["MWh_per_ha"] = "Warmtevraag per ha (MWh)"
+    breakdown.rename(columns=rename_map, inplace=True)
+
+    ordered_cols = ["Woonplaats", "Type pand", "MWh", "Panden"]
+    if "Oppervlakte (ha)" in breakdown.columns:
+        ordered_cols.append("Oppervlakte (ha)")
+    if "Warmtevraag per ha (MWh)" in breakdown.columns:
+        ordered_cols.append("Warmtevraag per ha (MWh)")
+
+    breakdown = breakdown.loc[:, [c for c in ordered_cols if c in breakdown.columns]]
+
+    for col in breakdown.columns:
+        if col == "MWh":
+            breakdown[col] = breakdown[col].map(_fmt_int)
+        elif col == "Panden":
+            breakdown[col] = breakdown[col].map(_fmt_int)
+        elif col in ("Oppervlakte (ha)", "Warmtevraag per ha (MWh)"):
+            breakdown[col] = breakdown[col].map(lambda v: _fmt_float(v, 2))
+    return breakdown
 
 
 def _build_sites_table(
@@ -1805,6 +1916,8 @@ def build_report_pdf(
     heat_unit: str | None = None,
     threshold_display: float | None = None,
     map_image: bytes | None = None,
+    pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
+    pandtype_mwh_by_woonplaats: pd.DataFrame | None = None,
     report_title: str = "Friese Warmteatlas",
 ) -> str:
     plt, PdfPages = _lazy_matplotlib()
@@ -1845,6 +1958,13 @@ def build_report_pdf(
         f"Warmtevraag: {_fmt_int(mwh_part)} MWh\n"
         f"Aantal panden: {_fmt_int(panden_part)}"
     )
+    pand_selectie_display = _format_selection(
+        ui.get("pand_selectie"),
+        max_items=999,
+        empty_label="-",
+    )
+    if pand_selectie_display.strip().lower() in {"alle types", "alle"}:
+        pand_selectie_display = "Woningen en bedrijven"
     kaart_rows = [
         ("Zoomniveau", _format_selection(zoom_level, empty_label="-")),
         ("Eenheid warmtevraag", unit_display),
@@ -1858,7 +1978,7 @@ def build_report_pdf(
             ),
         ),
         ("Bouwjaar", _format_year_range(ui.get("bouwjaar_range"))),
-        ("Type pand", _format_selection(ui.get("pand_selectie"), max_items=999, empty_label="-")),
+        ("Type pand", pand_selectie_display),
         ("Deelnamegraad", deelname_detail),
     ]
     kaart_table = pd.DataFrame(
@@ -1980,7 +2100,26 @@ def build_report_pdf(
                 pdf.savefig(fig, dpi=dpi)
                 _close_figure(fig, plt)
 
-        top_wp = _build_top_woonplaatsen_table(df_filtered)
+        top_wp = _build_top_woonplaatsen_table(
+            df_filtered,
+            pandtype_counts_by_woonplaats,
+        )
+        top_wp_col_widths = None
+        if top_wp is not None and not top_wp.empty:
+            top_wp_widths_map = {
+                "Woonplaats": 0.18,
+                "MWh": 0.12,
+                "Woningen": 0.14,
+                "Bedrijven": 0.14,
+                "Oppervlakte (ha)": 0.18,
+                "Warmtevraag per ha (MWh)": 0.24,
+            }
+            top_weights = [
+                top_wp_widths_map.get(col, 0.16) for col in top_wp.columns
+            ]
+            top_total = sum(top_weights)
+            if top_total:
+                top_wp_col_widths = [w / top_total for w in top_weights]
         max_row_height = _TABEL_RIJ_HOOGTE if _WOONPLAATSEN_ACHTERGROND.exists() else None
         table_bbox = (
             _WOONPLAATSEN_INDELING["table_bbox"] if _WOONPLAATSEN_ACHTERGROND.exists() else None
@@ -2000,6 +2139,7 @@ def build_report_pdf(
                 max_row_height=max_row_height,
                 header_bg=_STIJL["brand_blue"],
                 header_text_color=_STIJL["row_bg"],
+                col_widths=top_wp_col_widths,
             )
             page_num += 1
             _add_page_number(fig, page_num)
@@ -2027,6 +2167,91 @@ def build_report_pdf(
                     max_row_height=max_row_height,
                     header_bg=_STIJL["brand_blue"],
                     header_text_color=_STIJL["row_bg"],
+                    col_widths=top_wp_col_widths,
+                )
+                page_num += 1
+                _add_page_number(fig, page_num)
+                pdf.savefig(fig, dpi=dpi)
+                _close_figure(fig, plt)
+
+        pand_wp = _build_top_woonplaatsen_pand_table(
+            pandtype_mwh_by_woonplaats,
+            top_wp=top_wp,
+        )
+        pand_wp_col_widths = None
+        if pand_wp is not None and not pand_wp.empty:
+            pand_wp_widths_map = {
+                "Woonplaats": 0.16,
+                "Type pand": 0.28,
+                "MWh": 0.12,
+                "Panden": 0.10,
+                "Oppervlakte (ha)": 0.16,
+                "Warmtevraag per ha (MWh)": 0.18,
+            }
+            pand_weights = [
+                pand_wp_widths_map.get(col, 0.16) for col in pand_wp.columns
+            ]
+            pand_total = sum(pand_weights)
+            if pand_total:
+                pand_wp_col_widths = [w / pand_total for w in pand_weights]
+        pand_max_row_height = (
+            _TABEL_RIJ_HOOGTE if _WOONPLAATSEN_PAND_ACHTERGROND.exists() else None
+        )
+        pand_table_bbox = (
+            _WOONPLAATSEN_PAND_INDELING["table_bbox"]
+            if _WOONPLAATSEN_PAND_ACHTERGROND.exists()
+            else None
+        )
+        pand_show_title = not _WOONPLAATSEN_PAND_ACHTERGROND.exists()
+        pand_show_header = True
+        if pand_wp is None or pand_wp.empty:
+            fig = _render_table_page(
+                "Top woonplaatsen per type pand (MWh)",
+                pand_wp,
+                "Geen gegevens om te tonen.",
+                background=_WOONPLAATSEN_PAND_ACHTERGROND
+                if _WOONPLAATSEN_PAND_ACHTERGROND.exists()
+                else None,
+                image_max_side_px=image_max_side_px,
+                table_bbox=pand_table_bbox,
+                show_title=pand_show_title,
+                show_header=pand_show_header,
+                max_row_height=pand_max_row_height,
+                header_bg=_STIJL["brand_blue"],
+                header_text_color=_STIJL["row_bg"],
+                col_widths=pand_wp_col_widths,
+            )
+            page_num += 1
+            _add_page_number(fig, page_num)
+            pdf.savefig(fig, dpi=dpi)
+            _close_figure(fig, plt)
+        else:
+            if pand_table_bbox and pand_max_row_height:
+                header_rows = 1 if pand_show_header else 0
+                row_weight = 1 + _TABEL_RIJ_PADDING_FACTOR
+                max_total_rows = int(
+                    pand_table_bbox[3] / (pand_max_row_height * row_weight)
+                )
+                pand_max_rows = max(1, max_total_rows - header_rows)
+            else:
+                pand_max_rows = len(pand_wp)
+            for start in range(0, len(pand_wp), pand_max_rows):
+                chunk = pand_wp.iloc[start : start + pand_max_rows]
+                fig = _render_table_page(
+                    "Top woonplaatsen per type pand (MWh)",
+                    chunk,
+                    "Geen gegevens om te tonen.",
+                    background=_WOONPLAATSEN_PAND_ACHTERGROND
+                    if _WOONPLAATSEN_PAND_ACHTERGROND.exists()
+                    else None,
+                    image_max_side_px=image_max_side_px,
+                    table_bbox=pand_table_bbox,
+                    show_title=pand_show_title,
+                    show_header=pand_show_header,
+                    max_row_height=pand_max_row_height,
+                    header_bg=_STIJL["brand_blue"],
+                    header_text_color=_STIJL["row_bg"],
+                    col_widths=pand_wp_col_widths,
                 )
                 page_num += 1
                 _add_page_number(fig, page_num)

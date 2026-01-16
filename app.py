@@ -1030,8 +1030,149 @@ if should_compute:
                 ),
                 zoom_level=int(ui.get("zoom_level", 0)),
             )
-    
+
         # H3 hoofdlaag(en) per zoom
+        pandtype_counts_by_woonplaats = None
+        pandtype_counts_by_hex = None
+        pandtype_mwh_by_woonplaats = None
+        if isinstance(df_view_source, pd.DataFrame) and "Dataset" in df_view_source:
+            dataset_lc = (
+                df_view_source["Dataset"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            )
+            woningen_mask = dataset_lc.eq("kleinverbruik")
+            bedrijven_types = {
+                "middel- en grootverbruik alliander en tno",
+                "middel- en grootverbruik tno",
+            }
+            bedrijven_mask = dataset_lc.isin(bedrijven_types)
+            counts_hex = pd.DataFrame(
+                {
+                    "h3_index": df_view_source["h3_index"],
+                    "woningen": woningen_mask.astype("int32"),
+                    "bedrijven": bedrijven_mask.astype("int32"),
+                }
+            ).dropna(subset=["h3_index"])
+            if not counts_hex.empty:
+                pandtype_counts_by_hex = (
+                    counts_hex.groupby("h3_index", sort=False, observed=True).sum()
+                )
+            if "woonplaats" in df_view_source.columns:
+                counts_df = pd.DataFrame(
+                    {
+                        "woonplaats": df_view_source["woonplaats"],
+                        "woningen": woningen_mask.astype("int32"),
+                        "bedrijven": bedrijven_mask.astype("int32"),
+                    }
+                ).dropna(subset=["woonplaats"])
+                if not counts_df.empty:
+                    counts_df["woonplaats"] = (
+                        counts_df["woonplaats"].astype(str).str.strip()
+                    )
+                    pandtype_counts_by_woonplaats = (
+                        counts_df.groupby(
+                            "woonplaats", as_index=False, sort=False, observed=True
+                        ).sum()
+                    )
+
+        if (
+            isinstance(df_filtered, pd.DataFrame)
+            and isinstance(pandtype_counts_by_hex, pd.DataFrame)
+            and "woonplaats" in df_filtered.columns
+        ):
+            col_mwh = (
+                "sum_mwh_raw"
+                if "sum_mwh_raw" in df_filtered.columns
+                else "gemiddeld_jaarverbruik_mWh"
+            )
+            col_area = "area_ha" if "area_ha" in df_filtered.columns else None
+            col_density = (
+                "MWh_per_ha" if ("MWh_per_ha" in df_filtered.columns) else None
+            )
+            base_cols = ["h3_index", "woonplaats", col_mwh]
+            if col_area:
+                base_cols.append(col_area)
+            elif col_density:
+                base_cols.append(col_density)
+            df_type = df_filtered.loc[:, base_cols].copy()
+            df_type[col_mwh] = (
+                pd.to_numeric(df_type[col_mwh], errors="coerce").fillna(0)
+            )
+            if col_area and col_area in df_type.columns:
+                df_type[col_area] = (
+                    pd.to_numeric(df_type[col_area], errors="coerce").fillna(0)
+                )
+            if col_density and col_density in df_type.columns and not col_area:
+                df_type[col_density] = pd.to_numeric(
+                    df_type[col_density], errors="coerce"
+                )
+
+            counts_hex = pandtype_counts_by_hex.loc[:, ["woningen", "bedrijven"]].copy()
+            df_type = df_type.merge(
+                counts_hex, left_on="h3_index", right_index=True, how="left"
+            )
+            df_type["woningen"] = df_type["woningen"].fillna(0).astype("int32")
+            df_type["bedrijven"] = df_type["bedrijven"].fillna(0).astype("int32")
+            df_type = df_type[
+                (df_type["woningen"] > 0) | (df_type["bedrijven"] > 0)
+            ]
+            if not df_type.empty:
+                df_type["type_code"] = ""
+                df_type.loc[df_type["woningen"] > 0, "type_code"] = "A"
+                df_type.loc[df_type["bedrijven"] > 0, "type_code"] = "B"
+                df_type.loc[
+                    (df_type["woningen"] > 0) & (df_type["bedrijven"] > 0),
+                    "type_code",
+                ] = "C"
+                df_type = df_type[df_type["type_code"] != ""]
+                df_type["panden_count"] = 0
+                df_type.loc[df_type["type_code"] == "A", "panden_count"] = df_type[
+                    "woningen"
+                ]
+                df_type.loc[df_type["type_code"] == "B", "panden_count"] = df_type[
+                    "bedrijven"
+                ]
+                df_type.loc[df_type["type_code"] == "C", "panden_count"] = (
+                    df_type["woningen"] + df_type["bedrijven"]
+                )
+                agg_map = {
+                    col_mwh: "sum",
+                    "panden_count": "sum",
+                }
+                if col_area and col_area in df_type.columns:
+                    agg_map[col_area] = "sum"
+                elif col_density and col_density in df_type.columns:
+                    agg_map[col_density] = "mean"
+                pandtype_mwh_by_woonplaats = (
+                    df_type.groupby(
+                        ["woonplaats", "type_code"],
+                        as_index=False,
+                        sort=False,
+                        observed=True,
+                    )
+                    .agg(agg_map)
+                    .rename(
+                        columns={
+                            col_mwh: "MWh",
+                            "panden_count": "aantal_panden",
+                        }
+                    )
+                )
+                if col_area and col_area in pandtype_mwh_by_woonplaats.columns:
+                    area_vals = pandtype_mwh_by_woonplaats[col_area].replace(
+                        {0: pd.NA}
+                    )
+                    pandtype_mwh_by_woonplaats["MWh_per_ha"] = (
+                        pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
+                    )
+                elif col_density and col_density in pandtype_mwh_by_woonplaats.columns:
+                    pandtype_mwh_by_woonplaats.rename(
+                        columns={col_density: "MWh_per_ha"}, inplace=True
+                    )
+
         base_hex_cols = [
             "h3_index",
             "color",
@@ -1088,7 +1229,24 @@ if should_compute:
         df_hex_view["hex_section_display"] = "block"
         df_hex_view["site_section_display"] = "none"
         df_hex_view["geo_section_display"] = "none"
-    
+        if isinstance(pandtype_counts_by_hex, pd.DataFrame):
+            df_hex_view["woningen"] = (
+                df_hex_view["h3_index"]
+                .map(pandtype_counts_by_hex.get("woningen"))
+                .fillna(0)
+                .astype("int32")
+            )
+            df_hex_view["bedrijven"] = (
+                df_hex_view["h3_index"]
+                .map(pandtype_counts_by_hex.get("bedrijven"))
+                .fillna(0)
+                .astype("int32")
+            )
+        else:
+            df_hex_view["woningen"] = 0
+            df_hex_view["bedrijven"] = 0
+        df_hex_view["woningen_fmt"] = _fmt0_val(df_hex_view["woningen"])
+        df_hex_view["bedrijven_fmt"] = _fmt0_val(df_hex_view["bedrijven"])
         cols_for_hex = [
             "h3_index",
             "color",
@@ -1096,6 +1254,8 @@ if should_compute:
             "woonplaats",
             "aantal_huizen",
             "aantal_VBOs",
+            "woningen",
+            "bedrijven",
             "MWh_per_ha_r",
             "MWh_per_pand_r",
             "gemiddeld_jaarverbruik_mWh_r",
@@ -1105,6 +1265,8 @@ if should_compute:
             "bouwjaar",
             "aantal_huizen_fmt",
             "aantal_VBOs_fmt",
+            "woningen_fmt",
+            "bedrijven_fmt",
             "MWh_per_ha_r_fmt",
             "MWh_per_pand_fmt",
             "gemiddeld_jaarverbruik_mWh_r_fmt",
@@ -1121,6 +1283,47 @@ if should_compute:
             "buurt_row_display",
         ]
         df_hex_view = df_hex_view.loc[:, cols_for_hex]
+        pandtype_label_layer = None
+        show_pandtype_labels = bool(ui.get("show_main_layer")) and bool(
+            ui.get("show_pandtype_labels", True)
+        )
+        if show_pandtype_labels and not df_hex_view.empty:
+            label_size = 10
+            h3_resolution = int(ui.get("resolution") or ui.get("zoom_level", 0))
+            if h3_resolution >= 12:
+                label_size = 6
+            elif h3_resolution >= 11:
+                label_size = 8
+            label_df = df_hex_view.loc[
+                :, ["h3_index", "woningen", "bedrijven"]
+            ].copy()
+            label_df = label_df[
+                (label_df["woningen"] > 0) | (label_df["bedrijven"] > 0)
+            ]
+            if not label_df.empty:
+                label_df["label"] = "B"
+                label_df.loc[label_df["woningen"] > 0, "label"] = "A"
+                label_df.loc[
+                    (label_df["woningen"] > 0) & (label_df["bedrijven"] > 0), "label"
+                ] = "C"
+                coords = [h3.cell_to_latlng(h) for h in label_df["h3_index"]]
+                label_df["position"] = [
+                    [float(lon), float(lat)] for lat, lon in coords
+                ]
+                pandtype_label_layer = pdk.Layer(
+                    "TextLayer",
+                    label_df,
+                    pickable=False,
+                    get_position="position",
+                    get_text="label",
+                    get_size=label_size,
+                    size_units="pixels",
+                    size_scale=1,
+                    get_color=[18, 24, 32, 220],
+                    background=False,
+                    billboard=True,
+                    minZoom=12.2,
+                )
         indic_value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
         indic_mask = df_filtered[indic_value_col] > threshold_display
         df_indicative = df_hex_view.loc[indic_mask, :]
@@ -1166,9 +1369,17 @@ if should_compute:
         basemap_style = ui.get("basemap_style", ui.get("map_style"))
         base_layers = build_base_layers(basemap_style, hide_bg)
     
-        # Volgorde: basemap -> woonlagen -> H3/indicatief/sites
+        label_layers = [pandtype_label_layer] if pandtype_label_layer else []
+
+        # Volgorde: basemap -> woonlagen -> H3/indicatief/sites -> labels
         all_layers = (
-            base_layers + extra_layers + layers + wegennet_layers + warmtenet_layers + site_layers
+            base_layers
+            + extra_layers
+            + layers
+            + wegennet_layers
+            + warmtenet_layers
+            + site_layers
+            + label_layers
         )
     
         # ========== ViewState ==========
@@ -1180,7 +1391,7 @@ if should_compute:
                 return lat_manual, lon_manual, 13.0
             friesland_center = (53.125, 5.75)
             friesland_zoom = 8
-            min_zoom, max_zoom = 8, 13.0
+            min_zoom, max_zoom = 8, 18.0
             if not woonplaatsen_geselecteerd:
                 return friesland_center[0], friesland_center[1], friesland_zoom
             df_sel = df_full[df_full["woonplaats"].isin(woonplaatsen_geselecteerd)]
@@ -1222,7 +1433,7 @@ if should_compute:
             latitude=lat,
             zoom=zoom,
             min_zoom=7.5,
-            max_zoom=16,
+            max_zoom=18,
             pitch=0,
             bearing=0,
         )
@@ -1286,6 +1497,8 @@ if should_compute:
                 base_layers,
                 extra_layers,
                 warmtenet_layers,
+                label_layers,
+                pandtype_label_layer,
                 df_hex_view,
             )
             sites_records = None
@@ -1308,6 +1521,8 @@ if should_compute:
                     min_zoom_wegennet=int(
                         LAYER_CFG.get("wegennet", {}).get("min_zoom", 11)
                     ),
+                    pandtype_counts_by_woonplaats=pandtype_counts_by_woonplaats,
+                    pandtype_mwh_by_woonplaats=pandtype_mwh_by_woonplaats,
                 )
             st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):
@@ -1318,6 +1533,7 @@ if should_compute:
             st.session_state["report_requested"] = False
             st.session_state["report_image_uploaded"] = False
         else:
+            status_slot = report_slot if report_slot is not None else report_status_slot
             layer_state = {
                 "energiearmoede": show_energiearmoede,
                 "koopwoningen": show_koopwoningen,
@@ -1334,7 +1550,7 @@ if should_compute:
                 },
             }
             timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-            with report_status_slot.container():
+            with status_slot:
                 with st.spinner("PDF rapport genereren..."):
                     _cleanup_report_file()
                     st.session_state["report_pdf"] = None
@@ -1354,6 +1570,8 @@ if should_compute:
                             heat_unit=heat_unit,
                             threshold_display=threshold_display,
                             map_image=map_image,
+                            pandtype_counts_by_woonplaats=pandtype_counts_by_woonplaats,
+                            pandtype_mwh_by_woonplaats=pandtype_mwh_by_woonplaats,
                         )
                         st.session_state["report_filename"] = (
                             f"FRL_WarmteAtlas_{timestamp}.pdf"
@@ -1370,6 +1588,8 @@ if should_compute:
                                 heat_unit=heat_unit,
                                 threshold_display=threshold_display,
                                 map_image=None,
+                                pandtype_counts_by_woonplaats=pandtype_counts_by_woonplaats,
+                                pandtype_mwh_by_woonplaats=pandtype_mwh_by_woonplaats,
                             )
                             st.session_state["report_filename"] = (
                                 f"FRL_WarmteAtlas_{timestamp}.pdf"
@@ -1390,7 +1610,6 @@ if should_compute:
                             st.session_state["report_pdf"] = Path(report_path).read_bytes()
                         except Exception:
                             st.session_state["report_pdf"] = None
-            report_status_slot.empty()
             st.session_state["report_requested"] = False
             st.session_state["report_image_uploaded"] = False
     if report_slot is not None:

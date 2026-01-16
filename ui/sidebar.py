@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.config import LAYER_CFG, BASEMAP_CFG
 from core.io import resolve_wegennet_path, geojson_unique_props
@@ -148,6 +149,8 @@ def _render_big_legend(
     *,
     dark_mode: bool,
     show_threshold: bool,
+    show_pandtype_legend: bool = False,
+    pandtype_zoom_level: int | None = None,
 ):
     """Render de hoofdlegenda voor de warmtevraaglaag."""
     colors = _legend_theme_colors(dark_mode)
@@ -216,24 +219,56 @@ def _render_big_legend(
         f"<div><span class='color-box' style='background-color: {color};'></span> {label}</div>"
         for color, label in legend_rows
     )
-    legend_html = f"""
-        <style>
-            .legend {{
-                background: {bg}; padding: 10px; border-radius: 8px;
-                font-family: Arial, sans-serif; font-size: 12px; color: {text};
-                border: 1px solid {border}; margin-bottom: 15px;
-            }}
-            .legend-title {{ font-weight: bold; margin-bottom: 10px; display: block; color:{text}; }}
-            .color-box {{ width: 15px; height: 15px; display: inline-block; margin-right: 5px; border-radius:3px; border:1px solid {border}; }}
-            .legend-text-muted {{ color: {muted}; }}
-        </style>
-        <div class="legend">
-            <div class="legend-title">{title}</div>
-            {legend_html_rows}
-            {f"<div><span class='color-box' style='background-color: {pot_color};'></span> {pot_label}</div>" if pot_label else ""}
-        </div>
-    """
-    st.markdown(legend_html, unsafe_allow_html=True)
+    pandtype_html = ""
+    letter_bg = "#ffffff" if not dark_mode else "#111827"
+    if show_pandtype_legend:
+        pandtype_html = "\n".join(
+            [
+                "<div class='legend-subtitle'>Type pand in hexagoon</div>",
+                "<div><span class='letter-box'>A</span> Woningen</div>",
+                "<div><span class='letter-box'>B</span> Bedrijven</div>",
+                "<div><span class='letter-box'>C</span> Woningen en bedrijven</div>",
+            ]
+        )
+    legend_html = f"""<!doctype html>
+<html>
+  <head>
+    <style>
+      html, body {{ margin: 0; padding: 0; }}
+      .legend {{
+        width: 100%;
+        box-sizing: border-box;
+        background: {bg}; padding: 10px; border-radius: 8px;
+        font-family: Arial, sans-serif; font-size: 12px; color: {text};
+        border: 1px solid {border}; margin-bottom: 0;
+      }}
+      .legend-title {{ font-weight: bold; margin-bottom: 10px; display: block; color:{text}; }}
+      .color-box {{ width: 15px; height: 15px; display: inline-block; margin-right: 5px; border-radius:3px; border:1px solid {border}; }}
+      .legend-subtitle {{ font-weight: 600; margin: 8px 0 6px 0; color: {text}; }}
+      .letter-box {{
+        width: 18px; height: 18px; display: inline-flex;
+        align-items: center; justify-content: center; margin-right: 6px;
+        border-radius: 3px; border: 1px solid {border};
+        font-size: 11px; font-weight: 600; background: {letter_bg}; color: {text};
+      }}
+      .legend-text-muted {{ color: {muted}; }}
+    </style>
+  </head>
+  <body>
+    <div class="legend">
+      <div class="legend-title">{title}</div>
+      {legend_html_rows}
+      {f"<div><span class='color-box' style='background-color: {pot_color};'></span> {pot_label}</div>" if pot_label else ""}
+      {pandtype_html}
+    </div>
+  </body>
+</html>
+"""
+    row_count = len(legend_rows) + (1 if pot_label else 0) + 1
+    if show_pandtype_legend:
+        row_count += 5
+    legend_height = max(140, min(320, 40 + row_count * 18))
+    components.html(legend_html, height=legend_height, scrolling=False)
     if unit_norm in ("mwh/ha", "mwh_per_ha", "mwh_ha"):
         with st.expander("Uitleg legenda"):
             st.caption(info_text)
@@ -386,6 +421,12 @@ def build_sidebar(
             ui["show_indicative_layer"] = st.toggle(
                 "Aandachtsgebieden tonen", value=False, key="show_indicative_layer"
             )
+            ui["show_pandtype_labels"] = st.toggle(
+                "Toon onderscheid woningen/bedrijven",
+                value=st.session_state.get("show_pandtype_labels", True),
+                key="show_pandtype_labels",
+                disabled=not ui["show_main_layer"],
+            )
 
             zoom_level = int(ui.get("zoom_level", 0))
             default_unit = "MWh/ha" if zoom_level <= 10 else "kWh/m²"
@@ -489,6 +530,9 @@ def build_sidebar(
                 heat_unit,
                 dark_mode=dark_mode,
                 show_threshold=ui["show_indicative_layer"],
+                show_pandtype_legend=ui["show_main_layer"]
+                and ui.get("show_pandtype_labels", True),
+                pandtype_zoom_level=zoom_level,
             )
             ui["warmte_hex_opacity"] = st.slider(
                 "Transparantie warmtevraag-hexagonen",
@@ -622,6 +666,10 @@ def build_sidebar(
                     for w in st.session_state.get("woonplaats_selectie", [])
                     if w in model_wp_options
                 ]
+                sync_sig = tuple(base_default)
+                if st.session_state.get("_warmtenet_wp_sync") != sync_sig:
+                    st.session_state["warmtenet_wp_selectie"] = list(base_default)
+                    st.session_state["_warmtenet_wp_sync"] = sync_sig
                 default_model_wp = prev_model_wp or base_default or model_wp_options
                 model_wp_selectie = st.multiselect(
                     "Filter op woonplaats",
@@ -820,6 +868,12 @@ def build_sidebar(
                             for w in st.session_state.get("woonplaats_selectie", [])
                             if w in wp_options
                         ]
+                        sync_sig = tuple(base_default)
+                        if st.session_state.get("_wegennet_wp_sync") != sync_sig:
+                            st.session_state["wegennet_wp_selectie"] = list(
+                                base_default
+                            )
+                            st.session_state["_wegennet_wp_sync"] = sync_sig
                         default_wp = prev_wp or base_default or wp_options
                         wp_selectie = st.multiselect(
                             "Filter op woonplaats",
@@ -1207,11 +1261,11 @@ def build_sidebar(
                     else df["Dataset"].dropna().unique()
                 )
             ]
-            typepand_opties = ["Alle types"] + sorted(typepand)
+            typepand_opties = ["Woningen en bedrijven"] + sorted(typepand)
             pand_selectie = st.selectbox(
                 "Selecteer type pand:", options=typepand_opties
             )
-            if pand_selectie != "Alle types":
+            if pand_selectie != "Woningen en bedrijven":
                 df = df[df["Dataset"].astype(str) == pand_selectie]
             ui["pand_selectie"] = pand_selectie
 
@@ -1221,8 +1275,8 @@ def build_sidebar(
                     "Standaard staan alle types aan.\n\n"
                     "**Beschikbare datalagen:**\n"
                     "- **Liander / Stedin** – Kleinverbruik (woningen)\n"
-                    "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik \n"
-                    "- **Alliander** – Middel- tot grootverbruik\n"
+                    "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik (bedrijven)\n"
+                    "- **Alliander** – Middel- tot grootverbruik (bedrijven)\n"
                 )
             df_filtered = df
 

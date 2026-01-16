@@ -571,6 +571,8 @@ def build_deck_tooltip() -> dict:
         <h4>Heat Demand</h4>
         <div class="tooltip-row">Woonplaats: {woonplaats}</div>
         <div class="tooltip-row">Aantal panden: {aantal_huizen_fmt}</div>
+        <div class="tooltip-row">Aantal woningen: {woningen_fmt}</div>
+        <div class="tooltip-row">Aantal bedrijven: {bedrijven_fmt}</div>
         <div class="tooltip-row">Aantal VBO's: {aantal_VBOs_fmt}</div>
         <div class="tooltip-row">Warmtevraag grondoppervlakte: {MWh_per_ha_r_fmt} MWh/ha</div>
         <div class="tooltip-row">Totale Warmtevraag: {gemiddeld_jaarverbruik_mWh_r_fmt} MWh</div>

@@ -133,7 +133,12 @@ def render_participation_kpis(df_filtered: pd.DataFrame, participatie_pct: int) 
 
 
 def render_kpis(
-    df_filtered: pd.DataFrame, participatie_pct: int, include_participation: bool = True
+    df_filtered: pd.DataFrame,
+    participatie_pct: int,
+    *,
+    include_participation: bool = True,
+    woningen_total: int | None = None,
+    bedrijven_total: int | None = None,
 ) -> None:
     """
     Toont KPI-kaarten:
@@ -161,6 +166,24 @@ def render_kpis(
             "kpi-card kpi-center",
         ),
     ]
+    if woningen_total is not None:
+        cards.append(
+            _kpi_card_html(
+                "Aantal woningen",
+                _nl_int(woningen_total),
+                "",
+                "kpi-card kpi-center",
+            )
+        )
+    if bedrijven_total is not None:
+        cards.append(
+            _kpi_card_html(
+                "Aantal bedrijven",
+                _nl_int(bedrijven_total),
+                "",
+                "kpi-card kpi-center",
+            )
+        )
     if include_participation:
         cards.extend(
             [
@@ -750,32 +773,16 @@ def _render_warmtenet_comparison(
             "Kostenberekening: €1000/m leidingnet en €346/m aansluitingen. "
             "Warmtebron: gemiddeld 15 m per aansluiting."
         )
-        out_leidingen = pd.concat(
-            [
-                pd.DataFrame(
-                    {
-                        "Woonplaats": merged["woonplaats_display"],
-                        "Type": "Vraag",
-                        "Netwerk (m)": wegennet_lengte_m,
-                        "Aansluiting (m)": wegennet_conn_m,
-                        "Kosten\nnetwerk": kosten_net_wegennet,
-                        "Kosten\naansluiting": kosten_conn_wegennet,
-                        "Totale kosten": kosten_tot_wegennet,
-                    }
-                ),
-                pd.DataFrame(
-                    {
-                        "Woonplaats": merged["woonplaats_display"],
-                        "Type": "Bron",
-                        "Netwerk (m)": warmtenet_lengte_m,
-                        "Aansluiting (m)": warmtenet_conn_m,
-                        "Kosten\nnetwerk": kosten_net_warmtebron,
-                        "Kosten\naansluiting": kosten_conn_warmtebron,
-                        "Totale kosten": kosten_tot_warmtebron,
-                    }
-                ),
-            ],
-            ignore_index=True,
+        out_leidingen = pd.DataFrame(
+            {
+                "Woonplaats": merged["woonplaats_display"],
+                "Type": "Bron",
+                "Netwerk (m)": warmtenet_lengte_m,
+                "Aansluiting (m)": warmtenet_conn_m,
+                "Kosten\nnetwerk": kosten_net_warmtebron,
+                "Kosten\naansluiting": kosten_conn_warmtebron,
+                "Totale kosten": kosten_tot_warmtebron,
+            }
         ).sort_values(["Woonplaats", "Type"])
         out_fmt = out_leidingen.copy()
         for col in ["Netwerk (m)", "Aansluiting (m)"]:
@@ -809,6 +816,8 @@ def render_tabs(
     wegennet_wp: list[str] | None = None,
     zoom_level: int | None = None,
     min_zoom_wegennet: int = 11,
+    pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
+    pandtype_mwh_by_woonplaats: pd.DataFrame | None = None,
 ):
     """
     Tabs:
@@ -850,12 +859,20 @@ def render_tabs(
         )
         col_density = "MWh_per_ha"
         col_area = "area_ha"
+        col_panden = None
         available_cols = set(df_filtered.columns)
+        if "aantal_huizen" in available_cols:
+            col_panden = "aantal_huizen"
+        elif "aantal_VBOs" in available_cols:
+            col_panden = "aantal_VBOs"
 
         use_area = col_area in available_cols
         use_density_col = col_density in available_cols
 
         base_cols = [col_wp, col_mwh]
+        use_panden = col_panden is not None
+        if use_panden:
+            base_cols.append(col_panden)
         if use_area:
             base_cols.append(col_area)
         if use_density_col and not use_area:
@@ -877,6 +894,11 @@ def render_tabs(
             df_wp = df_wp.assign(**{col_mwh: s})
 
             agg_map = {col_mwh: "sum"}
+            if use_panden and col_panden:
+                df_wp[col_panden] = pd.to_numeric(
+                    df_wp[col_panden], errors="coerce"
+                ).fillna(0)
+                agg_map[col_panden] = "sum"
             if use_area:
                 area_series = pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
                 df_wp[col_area] = area_series
@@ -899,7 +921,7 @@ def render_tabs(
             )
             top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
 
-            area_display_col = "Gebiedsoppervlakte voor warmtevraag (ha)"
+            area_display_col = "Gebiedsoppervlakte (ha)"
             density_display_col = "Warmtevraag per ha (MWh)"
 
             if use_area and col_area in top_wp.columns:
@@ -912,27 +934,194 @@ def render_tabs(
                 # geen bron beschikbaar; maak lege kolom
                 top_wp[density_display_col] = pd.NA
 
-            # Vectorized formatting (vermijd apply lambda per rij waar mogelijk)
-            top_wp_fmt = top_wp.copy()
-            top_wp_fmt["MWh"] = (
-                top_wp_fmt["MWh"]
-                .round(0)
-                .astype("int64")
-                .map(lambda v: f"{v:,}".replace(",", "."))
+            type_col_woningen = "Woningen"
+            type_col_bedrijven = "Bedrijven"
+            type_col_panden = "Panden"
+            if (
+                isinstance(pandtype_counts_by_woonplaats, pd.DataFrame)
+                and not pandtype_counts_by_woonplaats.empty
+                and "woonplaats" in pandtype_counts_by_woonplaats.columns
+            ):
+                counts_wp = pandtype_counts_by_woonplaats.loc[
+                    :, ["woonplaats", "woningen", "bedrijven"]
+                ].copy()
+                counts_wp["woonplaats_norm"] = counts_wp["woonplaats"].map(
+                    _normalize_woonplaats
+                )
+                top_wp["woonplaats_norm"] = top_wp["Woonplaats"].map(
+                    _normalize_woonplaats
+                )
+                top_wp = top_wp.merge(
+                    counts_wp[
+                        ["woonplaats_norm", "woningen", "bedrijven"]
+                    ],
+                    on="woonplaats_norm",
+                    how="left",
+                )
+                top_wp.rename(
+                    columns={
+                        "woningen": type_col_woningen,
+                        "bedrijven": type_col_bedrijven,
+                    },
+                    inplace=True,
+                )
+            if use_panden and col_panden and col_panden in top_wp.columns:
+                top_wp.rename(columns={col_panden: type_col_panden}, inplace=True)
+            if "woonplaats_norm" in top_wp.columns:
+                top_wp.drop(columns=["woonplaats_norm"], inplace=True)
+
+            ordered_cols = ["Woonplaats", "MWh"]
+            if type_col_panden in top_wp.columns:
+                ordered_cols.append(type_col_panden)
+            if type_col_woningen in top_wp.columns:
+                ordered_cols.append(type_col_woningen)
+            if type_col_bedrijven in top_wp.columns:
+                ordered_cols.append(type_col_bedrijven)
+            if area_display_col in top_wp.columns:
+                ordered_cols.append(area_display_col)
+            if density_display_col in top_wp.columns:
+                ordered_cols.append(density_display_col)
+            top_wp = top_wp.loc[:, [c for c in ordered_cols if c in top_wp.columns]]
+
+            tab_total, tab_type = st.tabs(
+                [
+                    "Totale warmtevraag",
+                    "Totale warmtevraag per type pand",
+                ]
             )
-            if area_display_col in top_wp_fmt.columns:
-                top_wp_fmt[area_display_col] = top_wp_fmt[area_display_col].map(
-                    lambda v: "" if pd.isna(v) else _fmt2(float(v))
+
+            with tab_total:
+                top_wp_fmt = top_wp.copy()
+                top_wp_fmt["MWh"] = (
+                    top_wp_fmt["MWh"]
+                    .round(0)
+                    .astype("int64")
+                    .map(lambda v: f"{v:,}".replace(",", "."))
                 )
-            if density_display_col in top_wp_fmt.columns:
-                top_wp_fmt[density_display_col] = top_wp_fmt[density_display_col].map(
-                    lambda v: "" if pd.isna(v) else _fmt2(float(v))
-                )
-            _render_wrapped_table(top_wp_fmt, height=420)
+                if type_col_woningen in top_wp_fmt.columns:
+                    top_wp_fmt[type_col_woningen] = top_wp_fmt[
+                        type_col_woningen
+                    ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                if type_col_bedrijven in top_wp_fmt.columns:
+                    top_wp_fmt[type_col_bedrijven] = top_wp_fmt[
+                        type_col_bedrijven
+                    ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                if type_col_panden in top_wp_fmt.columns:
+                    top_wp_fmt[type_col_panden] = top_wp_fmt[type_col_panden].map(
+                        lambda v: "" if pd.isna(v) else _fmt0(v)
+                    )
+                if area_display_col in top_wp_fmt.columns:
+                    top_wp_fmt[area_display_col] = top_wp_fmt[
+                        area_display_col
+                    ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+                if density_display_col in top_wp_fmt.columns:
+                    top_wp_fmt[density_display_col] = top_wp_fmt[
+                        density_display_col
+                    ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+                _render_wrapped_table(top_wp_fmt, height=420)
+
+            with tab_type:
+                if (
+                    isinstance(pandtype_mwh_by_woonplaats, pd.DataFrame)
+                    and not pandtype_mwh_by_woonplaats.empty
+                ):
+                    breakdown = pandtype_mwh_by_woonplaats.copy()
+                    if "Woonplaats" in top_wp.columns:
+                        top_norms = top_wp["Woonplaats"].map(_normalize_woonplaats)
+                        top_order_map = {
+                            wp_norm: idx for idx, wp_norm in enumerate(top_norms)
+                        }
+                        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(
+                            _normalize_woonplaats
+                        )
+                        breakdown = breakdown[
+                            breakdown["woonplaats_norm"].isin(set(top_norms))
+                        ]
+                        breakdown["top_rank"] = breakdown["woonplaats_norm"].map(
+                            top_order_map
+                        )
+                        breakdown.drop(columns=["woonplaats_norm"], inplace=True)
+                    if not breakdown.empty:
+                        type_map = {
+                            "A": "A - Woningen",
+                            "B": "B - Bedrijven",
+                            "C": "C - Woningen en bedrijven",
+                        }
+                        breakdown["Type pand"] = (
+                            breakdown["type_code"].map(type_map).fillna(
+                                breakdown["type_code"]
+                            )
+                        )
+                        breakdown["Woonplaats"] = (
+                            breakdown["woonplaats"].astype(str).str.strip()
+                        )
+                        breakdown["type_order"] = (
+                            breakdown["type_code"]
+                            .map({"A": 0, "B": 1, "C": 2})
+                            .fillna(9)
+                        )
+                        sort_cols = (
+                            ["top_rank", "type_order"]
+                            if "top_rank" in breakdown.columns
+                            else ["Woonplaats", "type_order"]
+                        )
+                        breakdown.sort_values(sort_cols, inplace=True)
+
+                        rename_map = {
+                            "aantal_panden": "Panden",
+                        }
+                        area_display_col = "Gebiedsoppervlakte (ha)"
+                        density_display_col = "Warmtevraag per ha (MWh)"
+                        if "area_ha" in breakdown.columns:
+                            rename_map["area_ha"] = area_display_col
+                        if "MWh_per_ha" in breakdown.columns:
+                            rename_map["MWh_per_ha"] = density_display_col
+                        breakdown.rename(columns=rename_map, inplace=True)
+
+                        ordered_cols = [
+                            "Woonplaats",
+                            "Type pand",
+                            "MWh",
+                            "Panden",
+                        ]
+                        if area_display_col in breakdown.columns:
+                            ordered_cols.append(area_display_col)
+                        if density_display_col in breakdown.columns:
+                            ordered_cols.append(density_display_col)
+
+                        breakdown = breakdown.loc[
+                            :, [c for c in ordered_cols if c in breakdown.columns]
+                        ]
+
+                        breakdown_fmt = breakdown.copy()
+                        breakdown_fmt["MWh"] = (
+                            pd.to_numeric(breakdown_fmt["MWh"], errors="coerce")
+                            .round(0)
+                            .astype("Int64")
+                            .map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                        )
+                        if "Panden" in breakdown_fmt.columns:
+                            breakdown_fmt["Panden"] = breakdown_fmt["Panden"].map(
+                                lambda v: "" if pd.isna(v) else _fmt0(v)
+                            )
+                        if area_display_col in breakdown_fmt.columns:
+                            breakdown_fmt[area_display_col] = breakdown_fmt[
+                                area_display_col
+                            ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+                        if density_display_col in breakdown_fmt.columns:
+                            breakdown_fmt[density_display_col] = breakdown_fmt[
+                                density_display_col
+                            ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+
+                        _render_wrapped_table(breakdown_fmt, height=420)
+                    else:
+                        st.info("Geen gegevens om te tonen.")
+                else:
+                    st.info("Geen gegevens om te tonen.")
         else:
             st.info("Geen gegevens om te tonen.")
 
-    # --- TAB 2: Warmtenet inzicht ---
+# --- TAB 2: Warmtenet inzicht ---
     if show_comparison_tab:
         with tabs[tab_idx]:
             if not zoom_ok:
