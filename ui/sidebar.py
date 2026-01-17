@@ -675,11 +675,13 @@ def build_sidebar(
                 if st.session_state.get("_warmtenet_wp_sync") != sync_sig:
                     st.session_state["warmtenet_wp_selectie"] = list(base_default)
                     st.session_state["_warmtenet_wp_sync"] = sync_sig
-                default_model_wp = prev_model_wp or base_default or model_wp_options
+                if st.session_state.get("warmtenet_wp_selectie") is None:
+                    st.session_state["warmtenet_wp_selectie"] = list(
+                        prev_model_wp or base_default or model_wp_options
+                    )
                 model_wp_selectie = st.multiselect(
                     "Filter op woonplaats",
                     options=model_wp_options,
-                    default=default_model_wp,
                     key="warmtenet_wp_selectie",
                 )
                 ui["warmtenet_wp_selectie"] = model_wp_selectie
@@ -1549,6 +1551,12 @@ def build_sidebar(
                     st.session_state["report_map_image_name"] = uploaded.name
                     st.session_state["report_map_image_sig"] = upload_sig
                     st.session_state["report_image_uploaded"] = True
+                    st.session_state["show_map"] = False
+                    st.session_state["_map_changed"] = True
+                    st.session_state["map_raw_cache"] = None
+                    st.session_state["sites_ready"] = False
+                    st.session_state.pop("main_map_deck_chart", None)
+                    st.session_state.pop("main_map_deck_chart_selected_data", None)
                     _clear_report_cache()
                 del uploaded_bytes
             elif st.session_state.get("report_map_image_sig"):
