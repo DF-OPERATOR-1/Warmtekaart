@@ -1502,7 +1502,7 @@ if should_compute:
                     st.info("PDF wordt gegenereerd. Even geduld...")
                 elif report_ready:
                     st.info(
-                        "PDF gegenereerd. Klik op ‘Download PDF rapport’ om het rapport te downloaden."
+                        "PDF gegenereerd. Klik op ‘Download PDF-rapport’ om het rapport te downloaden."
                     )
                 deck = pdk.Deck(
                     layers=all_layers,
@@ -1598,7 +1598,7 @@ if should_compute:
         }
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
         with status_slot:
-            with st.spinner("PDF rapport genereren..."):
+            with st.spinner("PDF-rapport genereren..."):
                 st.session_state["report_in_progress"] = True
                 _cleanup_report_file()
                 map_image_path = st.session_state.get("report_map_image_path")
@@ -1676,7 +1676,7 @@ if should_compute:
         with report_slot:
             if report_path and Path(report_path).exists():
                 st.download_button(
-                    "Download PDF rapport",
+                    "Download PDF-rapport",
                     data=lambda p=report_path: open(p, "rb"),
                     file_name=report_filename,
                     mime="application/pdf",
@@ -1684,7 +1684,7 @@ if should_compute:
                 )
             else:
                 st.button(
-                    "Maak PDF rapport",
+                    "Maak PDF-rapport",
                     on_click=_request_report,
                     disabled=st.session_state.get("report_in_progress", False),
                 )
@@ -1700,12 +1700,12 @@ else:
             st.session_state.get("report_pdf_path")
         ).exists():
             st.info(
-                "PDF gegenereerd. Klik op ‘Download PDF rapport’ om het rapport te downloaden."
+                "PDF gegenereerd. Klik op ‘Download PDF-rapport’ om het rapport te downloaden."
             )
         elif st.session_state.get("report_image_uploaded"):
             st.info(
                 "Upload voltooid. Laat de instellingen ongewijzigd en klik op "
-                "‘Maak PDF rapport’."
+                "‘Maak PDF-rapport’."
             )
         elif st.session_state.get("_map_changed"):
             st.info(
@@ -1726,7 +1726,7 @@ else:
         with report_slot:
             if report_path and Path(report_path).exists():
                 st.download_button(
-                    "Download PDF rapport",
+                    "Download PDF-rapport",
                     data=lambda p=report_path: open(p, "rb"),
                     file_name=report_filename,
                     mime="application/pdf",
@@ -1734,7 +1734,7 @@ else:
                 )
             else:
                 st.button(
-                    "Maak PDF rapport",
+                    "Maak PDF-rapport",
                     on_click=_request_report,
                     disabled=st.session_state.get("report_in_progress", False),
                 )
