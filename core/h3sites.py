@@ -6,14 +6,9 @@ import json
 from functools import lru_cache
 from typing import Iterable, List
 
+import h3
 import pandas as pd
 import streamlit as st
-
-
-def _lazy_h3():
-    import importlib
-
-    return importlib.import_module("h3")
 
 
 # ============================================================
@@ -37,7 +32,6 @@ def build_neighbor_pairs(unique_cells: List[str], k: int) -> pd.DataFrame:
     Bouw (center, neighbor)-paren voor alle cells in een k-ring.
     Retourneert DataFrame met kolommen: center, neighbor
     """
-    h3 = _lazy_h3()
     rows = []
     K = int(k)
     for h in unique_cells:
@@ -54,7 +48,6 @@ def _grid_disk_cached(cell_id: str, k: int) -> tuple[str, ...]:
     """
     Kleine cache rond h3.grid_disk zodat we herhaalde neighbor-berekeningen vermijden.
     """
-    h3 = _lazy_h3()
     return tuple(h3.grid_disk(cell_id, k))
 
 
@@ -263,7 +256,6 @@ def select_sites_from_clusters(
       - utilization_pct
       - lat/lon (centroid van h3 cel)
     """
-    h3 = _lazy_h3()
     # Compacte kopie met expliciete dtypes
     out = cluster_df.loc[:, ["h3_index", "cluster_MWh", "cluster_buildings"]].copy()
     out["cluster_MWh"] = (

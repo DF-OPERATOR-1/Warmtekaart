@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import List, Dict, Any, Union, TYPE_CHECKING
 import math
 
+import pydeck as pdk
 import streamlit as st
+from pyproj import Transformer
 
 from .config import LAYER_CFG, BASEMAP_CFG
 from .utils import (
@@ -26,27 +28,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-def _lazy_pydeck():
-    import importlib
-
-    return importlib.import_module("pydeck")
-
-
-def _pdk_layer(layer_type: str, *args, **kwargs):
-    pdk = _lazy_pydeck()
-    return _pdk_layer(layer_type, *args, **kwargs)
-
-
-_RD_TO_WGS84 = None
-
-
-def _get_rd_to_wgs84():
-    global _RD_TO_WGS84
-    if _RD_TO_WGS84 is None:
-        from pyproj import Transformer
-
-        _RD_TO_WGS84 = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
-    return _RD_TO_WGS84
+_RD_TO_WGS84 = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
 
 
 # ------------------------------------------------------------
@@ -136,8 +118,7 @@ def _transform_coords_rd_to_wgs(coords):
     if isinstance(coords, (list, tuple)):
         if coords and isinstance(coords[0], (int, float)):
             if len(coords) >= 2:
-                transformer = _get_rd_to_wgs84()
-                lon, lat = transformer.transform(coords[0], coords[1])
+                lon, lat = _RD_TO_WGS84.transform(coords[0], coords[1])
                 return [float(lon), float(lat)]
             return coords
         return [_transform_coords_rd_to_wgs(c) for c in coords]
@@ -391,7 +372,7 @@ def build_base_layers(style_key: str, hide_basemap: bool):
         attribution = conf.get("attribution")
         if attribution:
             tile_kwargs["attribution"] = f"'{attribution}'"
-        layers_local.append(_pdk_layer("TileLayer", **tile_kwargs))
+        layers_local.append(pdk.Layer("TileLayer", **tile_kwargs))
 
     if conf.get("labels"):
         label_kwargs = {
@@ -403,7 +384,7 @@ def build_base_layers(style_key: str, hide_basemap: bool):
         label_attrib = conf.get("labels_attribution")
         if label_attrib:
             label_kwargs["attribution"] = f"'{label_attrib}'"
-        layers_local.append(_pdk_layer("TileLayer", **label_kwargs))
+        layers_local.append(pdk.Layer("TileLayer", **label_kwargs))
 
     return layers_local
 
@@ -421,7 +402,7 @@ def create_main_layer(
 ):
     """Bouw de primaire H3-laag met kleur en hoogte op basis van energievraag."""
     # verwacht een DataFrame (geen list[dict])
-    return _pdk_layer(
+    return pdk.Layer(
         "H3HexagonLayer",
         data_hex_df,
         pickable=True,
@@ -448,7 +429,7 @@ def create_indicative_area_layer(
     (DataFrame of list[dict]) met minimaal de kolom h3_index.
     """
     data_src = data
-    return _pdk_layer(
+    return pdk.Layer(
         "H3HexagonLayer",
         data_src,
         pickable=True,
@@ -612,7 +593,7 @@ def create_site_layers(
 
     if polygon_records:
         site_layers.append(
-            _pdk_layer(
+            pdk.Layer(
                 "PolygonLayer",
                 polygon_records,
                 pickable=True,
@@ -631,7 +612,7 @@ def create_site_layers(
 
     if hexagon_records:
         site_layers.append(
-            _pdk_layer(
+            pdk.Layer(
                 "H3HexagonLayer",
                 hexagon_records,
                 pickable=True,
@@ -744,7 +725,7 @@ def create_site_layers(
 def _geojson_layer(data, name, fill_color, line_color, opacity=0.5):
     if data is None:
         return None
-    return _pdk_layer(
+    return pdk.Layer(
         "GeoJsonLayer",
         data=data,
         pickable=True,
@@ -996,7 +977,7 @@ def create_wegennet_layers(
     if not feats:
         return []
 
-    layer = _pdk_layer(
+    layer = pdk.Layer(
         "GeoJsonLayer",
         data={"type": "FeatureCollection", "features": feats},
         pickable=True,
@@ -1263,7 +1244,7 @@ def create_warmtenet_layers(
     layers = []
     if line_feats:
         layers.append(
-            _pdk_layer(
+            pdk.Layer(
                 "GeoJsonLayer",
                 data={"type": "FeatureCollection", "features": line_feats},
                 pickable=True,
@@ -1278,7 +1259,7 @@ def create_warmtenet_layers(
 
     if point_records:
         layers.append(
-            _pdk_layer(
+            pdk.Layer(
                 "ScatterplotLayer",
                 point_records,
                 pickable=True,

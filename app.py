@@ -6,7 +6,9 @@ import gc
 from pathlib import Path
 import sys
 
+import h3
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 # Ensure the project root is first on sys.path for local package imports.
@@ -69,6 +71,7 @@ from core.io import (
     resolve_wegennet_path,
     resolve_wegennet_paths,
 )
+from core.report import build_report_pdf
 from ui.sidebar import build_sidebar
 from ui.kpis_and_tables import render_kpis, render_tabs
 
@@ -97,18 +100,6 @@ def _log_ram(label: str) -> None:
         print(f"[RAM_DEBUG] {label}: {mem_mb:.1f} MB")
     except Exception:
         pass
-
-
-def _lazy_h3():
-    import importlib
-
-    return importlib.import_module("h3")
-
-
-def _lazy_pydeck():
-    import importlib
-
-    return importlib.import_module("pydeck")
 
 
 # ========== Eerste init (NIET cache leegmaken) ==========
@@ -331,13 +322,6 @@ warmtevraag_notice_slot.markdown(
 def _handle_make_map_click() -> None:
     st.session_state["show_map"] = True
     st.session_state["_map_changed"] = False
-
-
-def _build_report_pdf(*args, **kwargs):
-    # Lazy import to avoid heavy report dependencies during cold start.
-    from core.report import build_report_pdf
-
-    return build_report_pdf(*args, **kwargs)
 
 
 st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
@@ -678,7 +662,6 @@ if map_button_clicked:
 # ========== Hoofdscherm ==========
 should_compute = st.session_state.show_map or st.session_state.get("report_requested")
 if should_compute:
-    h3 = _lazy_h3()
     if st.session_state.get("report_requested"):
         st.session_state.show_map = False
         st.session_state["_map_changed"] = True
@@ -1135,7 +1118,6 @@ if should_compute:
                 )
 
     if st.session_state.show_map:
-        pdk = _lazy_pydeck()
         # ========== Kaartlagen ==========
         geojson_dict = {
             "energiearmoede": gjson_energiearmoede,
@@ -1635,7 +1617,7 @@ if should_compute:
                     st.session_state.pop("main_map_deck_chart", None)
                     st.session_state.pop("main_map_deck_chart_selected_data", None)
                 try:
-                    st.session_state["report_pdf_path"] = _build_report_pdf(
+                    st.session_state["report_pdf_path"] = build_report_pdf(
                         df_filtered,
                         ui=ui,
                         layer_state=layer_state,
@@ -1654,7 +1636,7 @@ if should_compute:
                     report_generated = True
                 except Exception:
                     try:
-                        st.session_state["report_pdf_path"] = _build_report_pdf(
+                        st.session_state["report_pdf_path"] = build_report_pdf(
                             df_filtered,
                             ui=ui,
                             layer_state=layer_state,

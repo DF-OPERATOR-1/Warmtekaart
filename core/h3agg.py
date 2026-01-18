@@ -1,18 +1,13 @@
 # core/h3agg.py
 from __future__ import annotations
 
+import h3
 import pandas as pd
 import streamlit as st
 
 from .config import BASE_H3_RES, AVG_HA_BY_RES
 
 H3_RES13_COL = f"h3_r{BASE_H3_RES}"
-
-
-def _lazy_h3():
-    import importlib
-
-    return importlib.import_module("h3")
 
 # =============================
 # ÉÉN KEER H3 OP HOGE RESOLUTIE
@@ -23,7 +18,6 @@ def build_res13(df_src: pd.DataFrame) -> pd.DataFrame:
     """
     Maak één kolom met de basisresolutie (BASE_H3_RES) voor alle punten.
     """
-    h3 = _lazy_h3()
     lat_np = df_src["latitude"].astype("float32").to_numpy()
     lon_np = df_src["longitude"].astype("float32").to_numpy()
     h3_cells = [
@@ -39,7 +33,6 @@ def ensure_parent_series_for(
     """
     Maak/haal de parent H3-serie voor een doelresolutie 'res'.
     """
-    h3 = _lazy_h3()
     if res == BASE_H3_RES:
         return df_with_res13[H3_RES13_COL]
     if res in cache:
@@ -101,7 +94,6 @@ def rollup_to_resolution(
     """
     Roll-up van basisresolutie naar target_res (of laten als basis),
     """
-    h3 = _lazy_h3()
     if target_res == BASE_H3_RES:
         out = res13_agg.copy().rename(columns={H3_RES13_COL: "h3_index"})
     else:
