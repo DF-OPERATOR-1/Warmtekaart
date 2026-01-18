@@ -18,7 +18,6 @@ from core.io import (
     list_wegennet_woonplaatsen,
     normalize_wegennet_name,
 )
-from core.report import write_bytes_to_tempfile
 from core.utils import (
     format_dutch_number,
     get_dynamic_resolution,
@@ -33,6 +32,13 @@ from core.utils import (
     KWH_M2_COLORS,
 )
 from ui.kpis_and_tables import render_participation_kpis
+
+
+def _write_bytes_to_tempfile(*args, **kwargs):
+    # Lazy import to avoid pulling report dependencies during cold start.
+    from core.report import write_bytes_to_tempfile
+
+    return write_bytes_to_tempfile(*args, **kwargs)
 
 
 # ---------------------------
@@ -1544,7 +1550,7 @@ def build_sidebar(
                 if st.session_state.get("report_map_image_sig") != upload_sig:
                     _cleanup_report_map_image()
                     suffix = Path(uploaded.name).suffix or ".png"
-                    st.session_state["report_map_image_path"] = write_bytes_to_tempfile(
+                    st.session_state["report_map_image_path"] = _write_bytes_to_tempfile(
                         uploaded_bytes,
                         suffix=suffix,
                     )

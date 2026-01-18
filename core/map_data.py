@@ -4,13 +4,18 @@ from __future__ import annotations
 import math
 from typing import Callable, Any
 
-import h3
 import pandas as pd
 import streamlit as st
 
 from .config import BASE_H3_RES
 from .h3agg import H3_RES13_COL, build_res13, build_res13_agg, rollup_to_resolution
 from .utils import format_dutch_number
+
+
+def _lazy_h3():
+    import importlib
+
+    return importlib.import_module("h3")
 
 
 def extract_selected_hex_from_payload(state_obj) -> str | None:
@@ -83,6 +88,7 @@ def ensure_parent_series_for_cached(
     df_with_res13: pd.DataFrame, res: int
 ) -> pd.Series:
     """Geef h3-index op gewenste resolutie, bereken ouders indien nodig."""
+    h3 = _lazy_h3()
     if res == BASE_H3_RES:
         return df_with_res13[H3_RES13_COL]
     parents = [h3.cell_to_parent(h, res) for h in df_with_res13[H3_RES13_COL]]
@@ -96,6 +102,7 @@ def build_map_dataframe(
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Bereid dataframes voor de kaart en tooltips."""
+    h3 = _lazy_h3()
     df_map = build_res13_cached(df_input).reindex(df_input.index)
     if log_fn:
         log_fn("after_h3_base_raw")
@@ -163,6 +170,7 @@ def build_site_records(
     """
     if sites_df is None or sites_df.empty:
         return []
+    h3 = _lazy_h3()
 
     sites = sites_df.merge(
         df_filtered[["h3_index", "woonplaats"]].drop_duplicates(),
