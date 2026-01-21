@@ -895,7 +895,10 @@ def build_sidebar(
                                 base_default
                             )
                             st.session_state["_wegennet_wp_sync"] = sync_sig
-                        default_wp = prev_wp or base_default or wp_options
+                        if st.session_state.get("wegennet_wp_selectie") is None:
+                            st.session_state["wegennet_wp_selectie"] = list(
+                                prev_wp or base_default or wp_options
+                            )
                         def _format_woonplaats_label(value: str) -> str:
                             cleaned = value.replace("_", " ").strip()
                             if cleaned.islower():
@@ -905,7 +908,6 @@ def build_sidebar(
                         wp_selectie = st.multiselect(
                             "Filter op woonplaats",
                             options=wp_options,
-                            default=default_wp,
                             key="wegennet_wp_selectie",
                             format_func=_format_woonplaats_label,
                         )

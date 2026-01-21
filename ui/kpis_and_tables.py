@@ -971,8 +971,8 @@ def render_tabs(
         if top_wp is None or top_wp.empty:
             st.info("Geen gegevens om te tonen.")
         else:
-            type_col_woningen = "Woningen"
-            type_col_bedrijven = "Bedrijven"
+            type_col_woningen = "Kleinverbruik"
+            type_col_bedrijven = "Middel- en grootverbruik"
             type_col_panden = "Panden"
             if (
                 isinstance(pandtype_counts_by_woonplaats, pd.DataFrame)
@@ -1018,8 +1018,8 @@ def render_tabs(
 
             tab_total, tab_type = st.tabs(
                 [
-                    "Totale warmtevraag",
-                    "Totale warmtevraag per type pand",
+                    "Totale warmtevraag (woonplaatsgrenzen)",
+                    "Totale warmtevraag per type pand (hexagoon niveau)",
                 ]
             )
 

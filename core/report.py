@@ -1477,8 +1477,8 @@ def _build_top_woonplaatsen_table(
             )
             out_cols.append("Warmtevraag per ha (MWh)")
 
-    type_col_woningen = "Woningen"
-    type_col_bedrijven = "Bedrijven"
+    type_col_woningen = "Kleinverbruik"
+    type_col_bedrijven = "Middel- en grootverbruik"
     if (
         isinstance(pandtype_counts_by_woonplaats, pd.DataFrame)
         and not pandtype_counts_by_woonplaats.empty
@@ -2289,8 +2289,8 @@ def build_report_pdf(
             top_wp_widths_map = {
                 "Woonplaats": 0.18,
                 "MWh": 0.12,
-                "Woningen": 0.14,
-                "Bedrijven": 0.14,
+                "Kleinverbruik": 0.14,
+                "Middel- en grootverbruik": 0.14,
                 "Oppervlakte (ha)": 0.18,
                 "Warmtevraag per ha (MWh)": 0.24,
             }
