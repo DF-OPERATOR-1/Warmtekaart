@@ -974,6 +974,8 @@ def render_tabs(
             type_col_woningen = "Kleinverbruik"
             type_col_bedrijven = "Middel- en grootverbruik"
             type_col_panden = "Panden"
+            klein_mwh_by_wp: dict[str, float] = {}
+            mg_mwh_by_wp: dict[str, float] = {}
             if (
                 isinstance(pandtype_counts_by_woonplaats, pd.DataFrame)
                 and not pandtype_counts_by_woonplaats.empty
@@ -1002,6 +1004,32 @@ def render_tabs(
                 )
             if "woonplaats_norm" in top_wp.columns:
                 top_wp.drop(columns=["woonplaats_norm"], inplace=True)
+            if (
+                isinstance(pandtype_mwh_by_woonplaats, pd.DataFrame)
+                and not pandtype_mwh_by_woonplaats.empty
+                and {"woonplaats", "type_code", "MWh"}.issubset(
+                    pandtype_mwh_by_woonplaats.columns
+                )
+            ):
+                mwh_wp = pandtype_mwh_by_woonplaats.loc[
+                    :, ["woonplaats", "type_code", "MWh"]
+                ].copy()
+                mwh_wp["woonplaats_norm"] = mwh_wp["woonplaats"].map(
+                    _normalize_woonplaats
+                )
+                mwh_wp["MWh"] = pd.to_numeric(mwh_wp["MWh"], errors="coerce")
+                klein_mwh_by_wp = (
+                    mwh_wp[mwh_wp["type_code"] == "A"]
+                    .groupby("woonplaats_norm", sort=False)["MWh"]
+                    .sum()
+                    .to_dict()
+                )
+                mg_mwh_by_wp = (
+                    mwh_wp[mwh_wp["type_code"].isin(["B", "C"])]
+                    .groupby("woonplaats_norm", sort=False)["MWh"]
+                    .sum()
+                    .to_dict()
+                )
 
             ordered_cols = ["Woonplaats", "MWh"]
             if type_col_panden in top_wp.columns:
@@ -1018,8 +1046,8 @@ def render_tabs(
 
             tab_total, tab_type = st.tabs(
                 [
-                    "Totale warmtevraag (woonplaatsgrenzen)",
-                    "Totale warmtevraag per type pand (hexagoon niveau)",
+                    "Totale warmtevraag",
+                    "Totale warmtevraag per type pand",
                 ]
             )
 
@@ -1031,14 +1059,44 @@ def render_tabs(
                     .astype("int64")
                     .map(lambda v: f"{v:,}".replace(",", "."))
                 )
+                wp_norm = top_wp_fmt["Woonplaats"].map(_normalize_woonplaats)
+                klein_mwh_vals = (
+                    wp_norm.map(klein_mwh_by_wp) if klein_mwh_by_wp else None
+                )
+                mg_mwh_vals = wp_norm.map(mg_mwh_by_wp) if mg_mwh_by_wp else None
+
+                def _fmt_count_with_mwh(count, mwh):
+                    if pd.isna(count):
+                        return ""
+                    count_str = _fmt0(count)
+                    if pd.isna(mwh):
+                        return count_str
+                    return f"{count_str} ({_fmt0(mwh)} MWh)"
+
                 if type_col_woningen in top_wp_fmt.columns:
-                    top_wp_fmt[type_col_woningen] = top_wp_fmt[
-                        type_col_woningen
-                    ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                    if klein_mwh_vals is None:
+                        top_wp_fmt[type_col_woningen] = top_wp_fmt[
+                            type_col_woningen
+                        ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                    else:
+                        top_wp_fmt[type_col_woningen] = [
+                            _fmt_count_with_mwh(count, mwh)
+                            for count, mwh in zip(
+                                top_wp_fmt[type_col_woningen], klein_mwh_vals
+                            )
+                        ]
                 if type_col_bedrijven in top_wp_fmt.columns:
-                    top_wp_fmt[type_col_bedrijven] = top_wp_fmt[
-                        type_col_bedrijven
-                    ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                    if mg_mwh_vals is None:
+                        top_wp_fmt[type_col_bedrijven] = top_wp_fmt[
+                            type_col_bedrijven
+                        ].map(lambda v: "" if pd.isna(v) else _fmt0(v))
+                    else:
+                        top_wp_fmt[type_col_bedrijven] = [
+                            _fmt_count_with_mwh(count, mwh)
+                            for count, mwh in zip(
+                                top_wp_fmt[type_col_bedrijven], mg_mwh_vals
+                            )
+                        ]
                 if type_col_panden in top_wp_fmt.columns:
                     top_wp_fmt[type_col_panden] = top_wp_fmt[type_col_panden].map(
                         lambda v: "" if pd.isna(v) else _fmt0(v)
