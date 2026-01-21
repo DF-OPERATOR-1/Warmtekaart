@@ -428,8 +428,8 @@ def build_sidebar(
                 "Aandachtsgebieden tonen", value=False, key="show_indicative_layer"
             )
             ui["show_pandtype_labels"] = st.toggle(
-                "Toon onderscheid woningen/bedrijven",
-                value=st.session_state.get("show_pandtype_labels", True),
+                "Type pand tonen",
+                value=st.session_state.get("show_pandtype_labels", False),
                 key="show_pandtype_labels",
                 disabled=not ui["show_main_layer"],
             )
@@ -548,6 +548,35 @@ def build_sidebar(
                 key="warmte_hex_opacity",
                 help=opacity_help,
             )
+            all_types_label = "Klein-, middel- en grootverbruik"
+            if "Dataset" in df_in.columns:
+                dataset_series = df_in["Dataset"]
+                typepand = [
+                    str(x)
+                    for x in (
+                        dataset_series.cat.categories
+                        if hasattr(dataset_series, "cat")
+                        else dataset_series.dropna().unique()
+                    )
+                ]
+                typepand_opties = [all_types_label] + sorted(typepand)
+                pand_selectie = st.selectbox(
+                    "Selecteer type pand:",
+                    options=typepand_opties,
+                    key="pand_selectie",
+                )
+                ui["pand_selectie"] = pand_selectie
+                with st.expander("Uitleg over type pand"):
+                    st.write(
+                        "Hier kun je een specifiek type pand (bron van de data) selecteren om alleen die gegevens op de kaart te tonen. "
+                        "Standaard staan alle types aan.\n\n"
+                        "**Beschikbare datalagen:**\n"
+                        "- **Liander / Stedin** – Kleinverbruik (woningen)\n"
+                        "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik (bedrijven)\n"
+                        "- **Alliander** – Middel- tot grootverbruik (bedrijven)\n"
+                    )
+            else:
+                ui["pand_selectie"] = all_types_label
             if ui["show_indicative_layer"]:
                 with st.expander("Wat doet de grenswaarde?"):
                     st.write(
@@ -1281,35 +1310,11 @@ def build_sidebar(
             df = df[mask_by]
             ui["bouwjaar_range"] = (by_lo, by_hi)
 
-            # Type pand
-            st.subheader("Type pand")
-            typepand = [
-                str(x)
-                for x in (
-                    df["Dataset"].cat.categories
-                    if hasattr(df["Dataset"], "cat")
-                    else df["Dataset"].dropna().unique()
-                )
-            ]
-            typepand_opties = ["Klein-, middel- en grootverbruik"] + sorted(
-                typepand
-            )
-            pand_selectie = st.selectbox(
-                "Selecteer type pand:", options=typepand_opties
-            )
+            # Type pand (filter toepassen)
+            pand_selectie = ui.get("pand_selectie", "Klein-, middel- en grootverbruik")
             if pand_selectie != "Klein-, middel- en grootverbruik":
-                df = df[df["Dataset"].astype(str) == pand_selectie]
-            ui["pand_selectie"] = pand_selectie
-
-            with st.expander("Uitleg over type pand"):
-                st.write(
-                    "Hier kun je een specifiek type pand (bron van de data) selecteren om alleen die gegevens op de kaart te tonen. "
-                    "Standaard staan alle types aan.\n\n"
-                    "**Beschikbare datalagen:**\n"
-                    "- **Liander / Stedin** – Kleinverbruik (woningen)\n"
-                    "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik (bedrijven)\n"
-                    "- **Alliander** – Middel- tot grootverbruik (bedrijven)\n"
-                )
+                if "Dataset" in df.columns:
+                    df = df[df["Dataset"].astype(str) == pand_selectie]
             df_filtered = df
 
         if participatie_kpi_slot is not None:

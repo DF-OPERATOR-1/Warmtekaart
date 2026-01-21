@@ -1138,6 +1138,14 @@ if should_compute:
                 hex_agg.loc[hex_agg["type_code"] == "C", "panden_count"] = (
                     hex_agg["woningen"] + hex_agg["bedrijven"]
                 )
+                area_km2_lookup = {
+                    idx: float(h3.cell_area(idx, unit="km^2"))
+                    for idx in hex_agg[H3_RES13_COL].dropna().unique()
+                }
+                hex_agg["area_ha"] = (
+                    hex_agg[H3_RES13_COL].map(area_km2_lookup).astype("float32")
+                    * 100.0
+                )
                 pandtype_mwh_by_woonplaats = (
                     hex_agg.groupby(
                         ["woonplaats", "type_code"],
@@ -1148,37 +1156,14 @@ if should_compute:
                     .agg(
                         MWh=("MWh", "sum"),
                         aantal_panden=("panden_count", "sum"),
+                        area_ha=("area_ha", "sum"),
                     )
                     .reset_index(drop=True)
                 )
-                if (
-                    woonplaats_area_df is not None
-                    and not woonplaats_area_df.empty
-                    and "woonplaats" in woonplaats_area_df.columns
-                ):
-                    area_norm = woonplaats_area_df.copy()
-                    area_norm["woonplaats_norm"] = area_norm["woonplaats"].map(
-                        normalize_woonplaats
-                    )
-                    pandtype_mwh_by_woonplaats["woonplaats_norm"] = (
-                        pandtype_mwh_by_woonplaats["woonplaats"].map(
-                            normalize_woonplaats
-                        )
-                    )
-                    pandtype_mwh_by_woonplaats = pandtype_mwh_by_woonplaats.merge(
-                        area_norm[["woonplaats_norm", "area_ha"]],
-                        on="woonplaats_norm",
-                        how="left",
-                    )
-                    pandtype_mwh_by_woonplaats.drop(
-                        columns=["woonplaats_norm"], inplace=True
-                    )
-                    area_vals = pandtype_mwh_by_woonplaats["area_ha"].replace(
-                        {0: pd.NA}
-                    )
-                    pandtype_mwh_by_woonplaats["MWh_per_ha"] = (
-                        pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
-                    )
+                area_vals = pandtype_mwh_by_woonplaats["area_ha"].replace({0: pd.NA})
+                pandtype_mwh_by_woonplaats["MWh_per_ha"] = (
+                    pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
+                )
 
     if sites_records:
         _enrich_site_records_with_pandtypes(sites_records, pandtype_counts_by_hex)
@@ -1645,6 +1630,8 @@ if should_compute:
                     woonplaats_summary=woonplaats_summary,
                     pandtype_counts_by_woonplaats=pandtype_counts_by_woonplaats,
                     pandtype_mwh_by_woonplaats=pandtype_mwh_by_woonplaats,
+                    pand_selectie=ui.get("pand_selectie"),
+                    show_pandtype_labels=bool(ui.get("show_pandtype_labels", False)),
                 )
             st.session_state["_map_changed"] = False
     if st.session_state.get("report_requested"):
