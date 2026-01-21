@@ -15,19 +15,6 @@ import streamlit as st
 _ROOT_DIR = Path(__file__).resolve().parent
 if str(_ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(_ROOT_DIR))
-_core_mod = sys.modules.get("core")
-if _core_mod is not None:
-    _core_file = getattr(_core_mod, "__file__", None)
-    _core_paths = getattr(_core_mod, "__path__", None)
-    _core_is_local = False
-    if _core_file:
-        _core_is_local = str(Path(_core_file).resolve()).startswith(str(_ROOT_DIR))
-    elif _core_paths:
-        _core_is_local = any(
-            str(Path(p).resolve()).startswith(str(_ROOT_DIR)) for p in _core_paths
-        )
-    if not _core_is_local:
-        sys.modules.pop("core", None)
 
 # ---- interne modules ----
 from core.config import (
@@ -610,6 +597,57 @@ def _changed_filter_keys(prev: dict, curr: dict) -> set[str]:
     return {k for k in keys if prev.get(k) != curr.get(k)}
 
 
+def _enrich_site_records_with_pandtypes(
+    sites_records: list[dict],
+    pandtype_counts_by_hex: pd.DataFrame | None,
+) -> None:
+    if not sites_records:
+        return
+    woningen_map: dict[str, int] = {}
+    bedrijven_map: dict[str, int] = {}
+    if isinstance(pandtype_counts_by_hex, pd.DataFrame) and not pandtype_counts_by_hex.empty:
+        counts_df = pandtype_counts_by_hex
+        if "h3_index" in counts_df.columns:
+            counts_df = counts_df.set_index("h3_index")
+        counts_df = counts_df.copy()
+        counts_df.index = counts_df.index.astype(str)
+        if "woningen" in counts_df.columns:
+            woningen_map = (
+                pd.to_numeric(counts_df["woningen"], errors="coerce")
+                .fillna(0)
+                .astype("int64")
+                .to_dict()
+            )
+        if "bedrijven" in counts_df.columns:
+            bedrijven_map = (
+                pd.to_numeric(counts_df["bedrijven"], errors="coerce")
+                .fillna(0)
+                .astype("int64")
+                .to_dict()
+            )
+
+    for record in sites_records:
+        coverage_hexes = record.get("coverage_hexes") or []
+        total_woningen = 0
+        total_bedrijven = 0
+        for cov in coverage_hexes:
+            h3_id = str(cov.get("h3_index") or "")
+            woningen_val = int(woningen_map.get(h3_id, 0) or 0)
+            bedrijven_val = int(bedrijven_map.get(h3_id, 0) or 0)
+            cov["woningen"] = woningen_val
+            cov["bedrijven"] = bedrijven_val
+            cov["woningen_fmt"] = format_dutch_number(woningen_val, 0)
+            cov["bedrijven_fmt"] = format_dutch_number(bedrijven_val, 0)
+            total_woningen += woningen_val
+            total_bedrijven += bedrijven_val
+        coverage_summary = record.get("coverage_summary")
+        if isinstance(coverage_summary, dict):
+            coverage_summary["woningen"] = total_woningen
+            coverage_summary["bedrijven"] = total_bedrijven
+            coverage_summary["woningen_fmt"] = format_dutch_number(total_woningen, 0)
+            coverage_summary["bedrijven_fmt"] = format_dutch_number(total_bedrijven, 0)
+
+
 if "prev_filters" not in st.session_state:
     st.session_state.prev_filters = _build_filters_snapshot(ui)
 if "prev_report_filters" not in st.session_state:
@@ -1142,6 +1180,11 @@ if should_compute:
                         pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
                     )
 
+    if sites_records:
+        _enrich_site_records_with_pandtypes(sites_records, pandtype_counts_by_hex)
+        st.session_state.sites = sites_records
+        st.session_state.sites_costed = sites_records
+
     if st.session_state.show_map:
         # ========== Kaartlagen ==========
         geojson_dict = {
@@ -1661,7 +1704,7 @@ if should_compute:
                     )
                     st.session_state["report_map_image_error"] = None
                     report_generated = True
-                except Exception:
+                except Exception as exc:
                     try:
                         st.session_state["report_pdf_path"] = build_report_pdf(
                             df_filtered,
@@ -1679,9 +1722,12 @@ if should_compute:
                         st.session_state["report_filename"] = (
                             f"FRL_WarmteAtlas_{timestamp}.pdf"
                         )
+                        err_detail = type(exc).__name__
+                        if str(exc).strip():
+                            err_detail = f"{err_detail}: {exc}"
                         st.session_state["report_map_image_error"] = (
-                            "De kaartafbeelding kon niet worden gebruikt. "
-                            "PDF is zonder afbeelding gemaakt."
+                            "De kaartafbeelding kon niet worden gebruikt ("
+                            f"{err_detail}). PDF is zonder afbeelding gemaakt."
                         )
                         report_generated = True
                     except Exception:

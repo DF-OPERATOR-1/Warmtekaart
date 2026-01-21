@@ -498,7 +498,7 @@ def create_site_layers(
     """
     Maakt:
       - PolygonLayer (contour + semitransparant vlak) per warmtevoorziening
-      - H3HexagonLayer gevuld met dezelfde groene kleur voor de individuele hexagonen
+      - H3HexagonLayer met contrasterende vulling en zwarte omlijning voor de hexagonen
       - ScatterplotLayer markers met alle tooltip-velden (incl. *_fmt)
     """
     site_layers = []
@@ -506,8 +506,8 @@ def create_site_layers(
     if not records:
         return site_layers
 
-    base_fill = [26, 152, 80, 255]
-    base_line = [0, 0, 0, 255]
+    base_fill = [225, 86, 48, 140]
+    base_line = [0, 0, 0, 220]
 
     polygon_records = []
     hexagon_records = []
@@ -561,6 +561,10 @@ def create_site_layers(
                     "bouwjaar": coverage_summary.get("bouwjaar"),
                     "aantal_huizen_fmt": coverage_summary.get("aantal_huizen_fmt"),
                     "aantal_VBOs_fmt": coverage_summary.get("aantal_VBOs_fmt"),
+                    "woningen": coverage_summary.get("woningen"),
+                    "bedrijven": coverage_summary.get("bedrijven"),
+                    "woningen_fmt": coverage_summary.get("woningen_fmt"),
+                    "bedrijven_fmt": coverage_summary.get("bedrijven_fmt"),
                     "gemiddeld_jaarverbruik_mWh_r_fmt": coverage_summary.get(
                         "gemiddeld_jaarverbruik_mWh_r_fmt"
                     ),
@@ -616,11 +620,14 @@ def create_site_layers(
                 "H3HexagonLayer",
                 hexagon_records,
                 pickable=True,
-                filled=True,
-                stroked=False,
+                filled=False,
+                stroked=True,
                 extruded=False,
                 get_hexagon="h3_index",
                 get_fill_color="fill_color",
+                get_line_color="line_color",
+                lineWidthMinPixels=1.2,
+                lineWidthMaxPixels=6,
                 opacity=float(site_hex_opacity),
             )
         )

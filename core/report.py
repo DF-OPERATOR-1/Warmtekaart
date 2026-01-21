@@ -1549,9 +1549,9 @@ def _build_top_woonplaatsen_pand_table(
         return pd.DataFrame()
 
     type_map = {
-        "A": "A - Kleinverbruik",
-        "B": "B - Middel- en grootverbruik",
-        "C": "C - Klein-, middel- en grootverbruik",
+        "A": "Kleinverbruik",
+        "B": "Middel- en grootverbruik",
+        "C": "Klein-, middel- en grootverbruik",
     }
     breakdown["Type pand"] = breakdown["type_code"].map(type_map).fillna(
         breakdown["type_code"]

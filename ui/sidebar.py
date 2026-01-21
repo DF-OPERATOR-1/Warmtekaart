@@ -1321,7 +1321,7 @@ def build_sidebar(
         can_analyse = (ui["zoom_level"] >= 11) and bool(selected_places_prior)
         info_html = "<p style='font-size:12px; color:#6b7280; margin-bottom:8px;'>Warmtevraag hotspots beschikbaar vanaf zoomniveau 11.</p>"
 
-        with st.expander("Warmtevraag hotspots", expanded=False):
+        with st.expander("Warmtevraag-hotspots", expanded=False):
             default_site_opacity = st.session_state.get("sites_hex_opacity", 0.85)
             compute_sites = False
             reset_manual = False
@@ -1333,8 +1333,11 @@ def build_sidebar(
             else:
                 st.markdown(info_html, unsafe_allow_html=True)
                 ui["show_sites_layer"] = st.toggle(
-                    "Warmtevoorzieningen", value=False, key="show_sites_layer"
+                    "Warmte-hotspots", value=False, key="show_sites_layer"
                 )
+                if ui["show_sites_layer"] and not ui.get("show_main_layer"):
+                    st.session_state["show_main_layer"] = True
+                    ui["show_main_layer"] = True
 
                 if ui["show_sites_layer"]:
                     mode_options = {
@@ -1355,14 +1358,14 @@ def build_sidebar(
                     if ui["sites_mode"] == "auto":
                         if not st.session_state.get("sites_ready"):
                             st.info(
-                                "Stel eerst de filters in en zorg dat de kaart zichtbaar is om warmtevoorzieningen te tonen."
+                                "Stel eerst de filters in en zorg dat de kaart zichtbaar is om warmte-hotspots te tonen."
                             )
                         compute_sites = st.button(
-                            "Bereken warmtevoorzieningen", key="compute_sites_button"
+                            "Bereken warmte-hotspots", key="compute_sites_button"
                         )
                     else:
                         st.info(
-                            "Klik op een hexagon in de kaart om deze als startpunt voor de warmtevoorziening te gebruiken."
+                            "Klik op een hexagon in de kaart om deze als startpunt voor de warmte-hotspot te gebruiken."
                         )
                         reset_manual = st.button(
                             "Wis handmatige selectie", key="reset_manual_site"
@@ -1373,7 +1376,7 @@ def build_sidebar(
                         )
 
                     ui["sites_hex_opacity"] = st.slider(
-                        "Transparantie voorziening-hexagonen",
+                        "Transparantie warmte-hotspot",
                         min_value=0.0,
                         max_value=1.0,
                         value=float(
@@ -1395,7 +1398,7 @@ def build_sidebar(
                         prev_kring = 1
                         st.session_state.kring_radius = prev_kring
                     ui["kring_radius"] = st.slider(
-                        "Bereik van de warmtevoorziening",
+                        "Bereik van de warmte-hotspots",
                         1,
                         max_k_ring,
                         prev_kring,
@@ -1409,7 +1412,7 @@ def build_sidebar(
                             prev_min_sep = 5
                             st.session_state.min_sep = prev_min_sep
                         ui["min_sep"] = st.slider(
-                            "Minimale afstand tussen warmtevoorzieningen",
+                            "Minimale afstand tussen warmte-hotspots",
                             1,
                             5,
                             prev_min_sep,
@@ -1421,7 +1424,7 @@ def build_sidebar(
                             prev_n_sites = 20
                             st.session_state.n_sites = prev_n_sites
                         ui["n_sites"] = st.number_input(
-                            "Aantal collectieve warmtevoorzieningen",
+                            "Aantal warmte-hotspots",
                             min_value=1,
                             max_value=20,
                             value=prev_n_sites,
@@ -1438,7 +1441,7 @@ def build_sidebar(
                         default=100_000,
                     )
                     ui["cap_buildings"] = text_input_int(
-                        "Max gebouwen per voorziening",
+                        "Maximaal aantal panden per voorziening",
                         key="cap_buildings",
                         default=1_000,
                     )
@@ -1595,7 +1598,7 @@ def build_sidebar(
                 "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte."
             )
 
-        with st.expander("Warmtevraag hotspots", expanded=False):
+        with st.expander("Warmtevraag-hotspots", expanded=False):
             st.markdown(
                 """\
 **Doel van de analyse**  
