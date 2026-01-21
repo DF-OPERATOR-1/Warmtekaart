@@ -96,6 +96,14 @@ WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geoj
 WEGENNET_SUMMARY_PATH = _env_path(
     "WARMTE_WEGENNET_CSV", DATA_DIR / "wegennet" / "wegennet.csv"
 )
+WOONPLAATS_GPKG_PATH = _env_path(
+    "WARMTE_LYR_WOONPLAATSEN",
+    LAYERS_DIR / "BAG_Woonplaatsen_FRL-ruw.gpkg",
+)
+WOONPLAATS_AREA_PATH = _env_path(
+    "WARMTE_LYR_WOONPLAATSEN_AREA",
+    LAYERS_DIR / "woonplaats_area.csv",
+)
 
 
 # ================================

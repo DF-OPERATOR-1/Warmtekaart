@@ -50,7 +50,7 @@ print("Done.")
 import geopandas as gpd
 
 # Paden
-gpkg_path = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/wegennet_friesland.gpkg"
+gpkg_path = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/wegennet/wegennet_friesland.gpkg"
 out_path = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/wegennet_friesland.geojson"
 
 # Lees de enige laag in de geopackage

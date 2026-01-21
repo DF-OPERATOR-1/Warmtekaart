@@ -1397,59 +1397,85 @@ def _build_top_woonplaatsen_table(
     pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
     *,
     top_n: int = 15,
+    woonplaats_summary: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    if df_filtered is None or df_filtered.empty:
-        return pd.DataFrame()
-    col_wp = "woonplaats"
-    col_mwh = (
-        "sum_mwh_raw"
-        if "sum_mwh_raw" in df_filtered.columns
-        else "gemiddeld_jaarverbruik_mWh"
-    )
-    col_area = "area_ha"
-    col_density = "MWh_per_ha"
-    available_cols = set(df_filtered.columns)
-    use_area = col_area in available_cols
-    use_density_col = col_density in available_cols
-    base_cols = [col_wp, col_mwh]
-    if use_area:
-        base_cols.append(col_area)
-    elif use_density_col:
-        base_cols.append(col_density)
-    if not set(base_cols).issubset(available_cols):
-        return pd.DataFrame()
-    df_wp = df_filtered.loc[:, base_cols].copy()
-    if df_wp.empty:
-        return pd.DataFrame()
-    df_wp[col_mwh] = pd.to_numeric(df_wp[col_mwh], errors="coerce").fillna(0)
-    agg_map: dict[str, str] = {col_mwh: "sum"}
-    density_source = None
-    if use_area:
-        df_wp[col_area] = pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
-        agg_map[col_area] = "sum"
-        density_source = "area"
-    elif use_density_col:
-        df_wp[col_density] = pd.to_numeric(df_wp[col_density], errors="coerce")
-        agg_map[col_density] = "mean"
-        density_source = "col"
-    top_wp = (
-        df_wp.groupby(col_wp, as_index=False, sort=False, observed=True)
-        .agg(agg_map)
-        .rename(columns={col_mwh: "MWh"})
-        .sort_values("MWh", ascending=False)
-        .head(top_n)
-    )
-    top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
+    top_wp = None
     out_cols = ["Woonplaats", "MWh"]
-    if use_area and col_area in top_wp.columns:
-        top_wp["Warmtevraag per ha (MWh)"] = top_wp["MWh"].div(
-            top_wp[col_area].replace(0, pd.NA)
+    if (
+        isinstance(woonplaats_summary, pd.DataFrame)
+        and not woonplaats_summary.empty
+        and {"woonplaats", "MWh"}.issubset(woonplaats_summary.columns)
+    ):
+        top_wp = woonplaats_summary.copy()
+        top_wp["woonplaats"] = top_wp["woonplaats"].astype(str).str.strip()
+        top_wp = (
+            top_wp.sort_values("MWh", ascending=False)
+            .head(top_n)
+            .rename(columns={"woonplaats": "Woonplaats"})
         )
-        top_wp.rename(columns={col_area: "Oppervlakte (ha)"}, inplace=True)
-        out_cols.extend(["Oppervlakte (ha)", "Warmtevraag per ha (MWh)"])
-    elif density_source == "col" and col_density in top_wp.columns:
-        top_wp.rename(columns={col_density: "Warmtevraag per ha (MWh)"}, inplace=True)
-        out_cols.append("Warmtevraag per ha (MWh)")
+        if "area_ha" in top_wp.columns:
+            top_wp["Warmtevraag per ha (MWh)"] = top_wp["MWh"].div(
+                top_wp["area_ha"].replace(0, pd.NA)
+            )
+            top_wp.rename(columns={"area_ha": "Oppervlakte (ha)"}, inplace=True)
+            out_cols.extend(["Oppervlakte (ha)", "Warmtevraag per ha (MWh)"])
+        elif "MWh_per_ha" in top_wp.columns:
+            top_wp.rename(columns={"MWh_per_ha": "Warmtevraag per ha (MWh)"}, inplace=True)
+            out_cols.append("Warmtevraag per ha (MWh)")
+    else:
+        if df_filtered is None or df_filtered.empty:
+            return pd.DataFrame()
+        col_wp = "woonplaats"
+        col_mwh = (
+            "sum_mwh_raw"
+            if "sum_mwh_raw" in df_filtered.columns
+            else "gemiddeld_jaarverbruik_mWh"
+        )
+        col_area = "area_ha"
+        col_density = "MWh_per_ha"
+        available_cols = set(df_filtered.columns)
+        use_area = col_area in available_cols
+        use_density_col = col_density in available_cols
+        base_cols = [col_wp, col_mwh]
+        if use_area:
+            base_cols.append(col_area)
+        elif use_density_col:
+            base_cols.append(col_density)
+        if not set(base_cols).issubset(available_cols):
+            return pd.DataFrame()
+        df_wp = df_filtered.loc[:, base_cols].copy()
+        if df_wp.empty:
+            return pd.DataFrame()
+        df_wp[col_mwh] = pd.to_numeric(df_wp[col_mwh], errors="coerce").fillna(0)
+        agg_map: dict[str, str] = {col_mwh: "sum"}
+        density_source = None
+        if use_area:
+            df_wp[col_area] = pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
+            agg_map[col_area] = "sum"
+            density_source = "area"
+        elif use_density_col:
+            df_wp[col_density] = pd.to_numeric(df_wp[col_density], errors="coerce")
+            agg_map[col_density] = "mean"
+            density_source = "col"
+        top_wp = (
+            df_wp.groupby(col_wp, as_index=False, sort=False, observed=True)
+            .agg(agg_map)
+            .rename(columns={col_mwh: "MWh"})
+            .sort_values("MWh", ascending=False)
+            .head(top_n)
+        )
+        top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
+        if use_area and col_area in top_wp.columns:
+            top_wp["Warmtevraag per ha (MWh)"] = top_wp["MWh"].div(
+                top_wp[col_area].replace(0, pd.NA)
+            )
+            top_wp.rename(columns={col_area: "Oppervlakte (ha)"}, inplace=True)
+            out_cols.extend(["Oppervlakte (ha)", "Warmtevraag per ha (MWh)"])
+        elif density_source == "col" and col_density in top_wp.columns:
+            top_wp.rename(
+                columns={col_density: "Warmtevraag per ha (MWh)"}, inplace=True
+            )
+            out_cols.append("Warmtevraag per ha (MWh)")
 
     type_col_woningen = "Woningen"
     type_col_bedrijven = "Bedrijven"
@@ -1523,9 +1549,9 @@ def _build_top_woonplaatsen_pand_table(
         return pd.DataFrame()
 
     type_map = {
-        "A": "A - Woningen",
-        "B": "B - Bedrijven",
-        "C": "C - Woningen en bedrijven",
+        "A": "A - Kleinverbruik",
+        "B": "B - Middel- en grootverbruik",
+        "C": "C - Klein-, middel- en grootverbruik",
     }
     breakdown["Type pand"] = breakdown["type_code"].map(type_map).fillna(
         breakdown["type_code"]
@@ -2057,6 +2083,7 @@ def build_report_pdf(
     heat_unit: str | None = None,
     threshold_display: float | None = None,
     map_image_path: str | None = None,
+    woonplaats_summary: pd.DataFrame | None = None,
     pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
     pandtype_mwh_by_woonplaats: pd.DataFrame | None = None,
     report_title: str = "Friese Warmteatlas",
@@ -2107,7 +2134,7 @@ def build_report_pdf(
         empty_label="-",
     )
     if pand_selectie_display.strip().lower() in {"alle types", "alle"}:
-        pand_selectie_display = "Woningen en bedrijven"
+        pand_selectie_display = "Klein-, middel- en grootverbruik"
     kaart_rows = [
         ("Zoomniveau", _format_selection(zoom_level, empty_label="-")),
         ("Eenheid warmtevraag", unit_display),
@@ -2255,6 +2282,7 @@ def build_report_pdf(
         top_wp = _build_top_woonplaatsen_table(
             df_filtered,
             pandtype_counts_by_woonplaats,
+            woonplaats_summary=woonplaats_summary,
         )
         top_wp_col_widths = None
         if top_wp is not None and not top_wp.empty:

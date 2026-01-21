@@ -15,3 +15,5 @@ data/safe file/energiearmoede_frl.geojson.gz
 data/safe file/koopwoningen_frl.geojson.gz
 data/safe file/wooncorporatie_frl.geojson.gz
 data/safe file/warmtenet_full.geojson.gz
+data/wegennet/wegennet_friesland.geojson
+data/wegennet/wegennet_friesland.gpkg

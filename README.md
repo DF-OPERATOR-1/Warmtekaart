@@ -17,6 +17,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - core/h3agg.py: H3 aggregaties en groepering van data.
 - core/map_data.py: kaartdata voorbereiden + site records opbouwen.
 - core/report.py: PDF-rapportage (samenvatting, tabellen, kaartpagina).
+- core/woonplaats.py: woonplaats-aggregaties en oppervlakte uit geopackage.
 - data/scripts/geojson.py: hulpscript voor GeoJSON bewerkingen/conversie.
 
 ## Waar pas je wat aan?
@@ -32,6 +33,8 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 
 **Data paden + defaults**
 - core/config.py: bij *_PATH
+- core/config.py: WOONPLAATS_GPKG_PATH / WARMTE_LYR_WOONPLAATSEN
+- core/config.py: WOONPLAATS_AREA_PATH / WARMTE_LYR_WOONPLAATSEN_AREA
 
 **GeoJSON precisie en payload**
 - core/io.py: (load_geojson, coord_precision)
@@ -62,6 +65,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - `map_data.py`: bouwt de map-dataframes voor de kaart (filter/rollup/tooltip data).
 - `h3sites.py`: warmtenet selectie/cluster-logica.
 - `report.py`: PDF-rapportage generator.
+- `woonplaats.py`: woonplaats totalen + oppervlakte uit geopackage.
 
 **ui/**
 - `sidebar.py`: alle filters, toggles en waarschuwingen.
@@ -71,6 +75,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - `geojson.py`: CRS-conversie + GeoJSON comprimeren.
 - `parquet_conv.py`: CSV -> Parquet en basis afgeleide velden.
 - `shrink_dataset.py`: maak compacte parquet met juiste dtypes.
+- `woonplaats_area_export.py`: schrijf woonplaats_area.csv of .parquet uit de gpkg.
 
 **app.py**
 - Orchestrator: laadt data, leest UI, berekent aggregaties, bouwt lagen en rendert.
@@ -78,8 +83,16 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 ## Dataflow (hoog niveau)
 1) Data en lagen laden.
 2) Sidebar bepaalt filters/toggles en schrijft naar `st.session_state`.
-3) H3 aggregaties en (optioneel) warmtenet-analyse worden gebouwd.
-4) PyDeck lagen + tooltip samenstellen en renderen.
+3) Woonplaats-samenvatting wordt gebouwd op basis van puntdata.
+4) H3 aggregaties en (optioneel) warmtenet-analyse worden gebouwd.
+5) PyDeck lagen + tooltip samenstellen en renderen.
+
+## Woonplaats logica
+- Tabellen en rapporten gebruiken woonplaats totalen uit puntdata (stabiel over zoom).
+- Oppervlakte per woonplaats komt uit `data/layers/woonplaats_area.csv` (voorbewerkt).
+- Hexagonen zijn alleen visualisatie; H3-oppervlakte bepaalt MWh/ha op de kaart.
+- Voorbewerken om RAM te sparen: `python data/scripts/woonplaats_area_export.py`
+- Bronbestand voor export: `data/layers/BAG_Woonplaatsen_FRL-ruw.gpkg`
 
 ## Kaartlagen
 - Basislaag: warmtevraag (H3).

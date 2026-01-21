@@ -231,9 +231,9 @@ def _render_big_legend(
         pandtype_html = "\n".join(
             [
                 "<div class='legend-subtitle'>Type pand in hexagoon</div>",
-                "<div><span class='letter-box'>A</span> Woningen</div>",
-                "<div><span class='letter-box'>B</span> Bedrijven</div>",
-                "<div><span class='letter-box'>C</span> Woningen en bedrijven</div>",
+                "<div><span class='letter-box'>A</span> Kleinverbruik</div>",
+                "<div><span class='letter-box'>B</span> Middel- en grootverbruik</div>",
+                "<div><span class='letter-box'>C</span> Klein-, middel- en grootverbruik</div>",
             ]
         )
     legend_html = f"""<!doctype html>
@@ -1289,11 +1289,13 @@ def build_sidebar(
                     else df["Dataset"].dropna().unique()
                 )
             ]
-            typepand_opties = ["Woningen en bedrijven"] + sorted(typepand)
+            typepand_opties = ["Klein-, middel- en grootverbruik"] + sorted(
+                typepand
+            )
             pand_selectie = st.selectbox(
                 "Selecteer type pand:", options=typepand_opties
             )
-            if pand_selectie != "Woningen en bedrijven":
+            if pand_selectie != "Klein-, middel- en grootverbruik":
                 df = df[df["Dataset"].astype(str) == pand_selectie]
             ui["pand_selectie"] = pand_selectie
 

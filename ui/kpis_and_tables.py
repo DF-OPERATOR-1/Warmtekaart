@@ -816,6 +816,7 @@ def render_tabs(
     wegennet_wp: list[str] | None = None,
     zoom_level: int | None = None,
     min_zoom_wegennet: int = 11,
+    woonplaats_summary: pd.DataFrame | None = None,
     pandtype_counts_by_woonplaats: pd.DataFrame | None = None,
     pandtype_mwh_by_woonplaats: pd.DataFrame | None = None,
 ):
@@ -850,90 +851,126 @@ def render_tabs(
 
     # --- TAB 1: Top woonplaatsen (MWh) ---
     with tab1:
-        # Beperk kolommen vóór groupby
-        col_wp = "woonplaats"
-        col_mwh = (
-            "sum_mwh_raw"
-            if "sum_mwh_raw" in df_filtered.columns
-            else "gemiddeld_jaarverbruik_mWh"
-        )
-        col_density = "MWh_per_ha"
-        col_area = "area_ha"
-        col_panden = None
-        available_cols = set(df_filtered.columns)
-        if "aantal_huizen" in available_cols:
-            col_panden = "aantal_huizen"
-        elif "aantal_VBOs" in available_cols:
-            col_panden = "aantal_VBOs"
+        area_display_col = "Gebiedsoppervlakte (ha)"
+        density_display_col = "Warmtevraag per ha (MWh)"
+        top_wp = None
 
-        use_area = col_area in available_cols
-        use_density_col = col_density in available_cols
-
-        base_cols = [col_wp, col_mwh]
-        use_panden = col_panden is not None
-        if use_panden:
-            base_cols.append(col_panden)
-        if use_area:
-            base_cols.append(col_area)
-        if use_density_col and not use_area:
-            # alleen meenemen als area ontbreekt; anders berekenen we het zelf
-            base_cols.append(col_density)
-
-        if set(base_cols) <= available_cols:
-            df_wp = df_filtered.loc[:, base_cols]
-        else:
-            missing_cols = set(base_cols) - available_cols
-            if missing_cols:
-                # kan gebeuren bij lege datasets; maak lege df
-                df_wp = pd.DataFrame(columns=base_cols)
-            else:
-                df_wp = df_filtered.loc[:, base_cols]
-
-        if not df_wp.empty:
-            s = pd.to_numeric(df_wp[col_mwh], errors="coerce").fillna(0)
-            df_wp = df_wp.assign(**{col_mwh: s})
-
-            agg_map = {col_mwh: "sum"}
-            if use_panden and col_panden:
-                df_wp[col_panden] = pd.to_numeric(
-                    df_wp[col_panden], errors="coerce"
-                ).fillna(0)
-                agg_map[col_panden] = "sum"
-            if use_area:
-                area_series = pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
-                df_wp[col_area] = area_series
-                agg_map[col_area] = "sum"
-                density_source = "area"
-            elif use_density_col:
-                density_series = pd.to_numeric(df_wp[col_density], errors="coerce")
-                df_wp[col_density] = density_series
-                agg_map[col_density] = "mean"
-                density_source = "col"
-            else:
-                density_source = None
-
+        if (
+            isinstance(woonplaats_summary, pd.DataFrame)
+            and not woonplaats_summary.empty
+            and {"woonplaats", "MWh"}.issubset(woonplaats_summary.columns)
+        ):
+            top_wp = woonplaats_summary.copy()
+            top_wp["woonplaats"] = top_wp["woonplaats"].astype(str).str.strip()
             top_wp = (
-                df_wp.groupby(col_wp, as_index=False, sort=False, observed=True)
-                .agg(agg_map)
-                .rename(columns={col_mwh: "MWh"})
-                .sort_values("MWh", ascending=False)
+                top_wp.sort_values("MWh", ascending=False)
                 .head(15)
+                .rename(columns={"woonplaats": "Woonplaats"})
             )
-            top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
-
-            area_display_col = "Gebiedsoppervlakte (ha)"
-            density_display_col = "Warmtevraag per ha (MWh)"
-
-            if use_area and col_area in top_wp.columns:
-                top_wp.rename(columns={col_area: area_display_col}, inplace=True)
+            if "area_ha" in top_wp.columns:
+                top_wp.rename(columns={"area_ha": area_display_col}, inplace=True)
                 area_vals = top_wp[area_display_col].replace({0: pd.NA})
                 top_wp[density_display_col] = top_wp["MWh"].div(area_vals)
-            elif density_source == "col" and col_density in top_wp.columns:
-                top_wp.rename(columns={col_density: density_display_col}, inplace=True)
+            elif "MWh_per_ha" in top_wp.columns:
+                top_wp.rename(columns={"MWh_per_ha": density_display_col}, inplace=True)
             else:
-                # geen bron beschikbaar; maak lege kolom
                 top_wp[density_display_col] = pd.NA
+            if "aantal_huizen" in top_wp.columns:
+                top_wp.rename(columns={"aantal_huizen": "Panden"}, inplace=True)
+            elif "aantal_VBOs" in top_wp.columns:
+                top_wp.rename(columns={"aantal_VBOs": "Panden"}, inplace=True)
+        else:
+            # Beperk kolommen vóór groupby
+            col_wp = "woonplaats"
+            col_mwh = (
+                "sum_mwh_raw"
+                if "sum_mwh_raw" in df_filtered.columns
+                else "gemiddeld_jaarverbruik_mWh"
+            )
+            col_density = "MWh_per_ha"
+            col_area = "area_ha"
+            col_panden = None
+            available_cols = set(df_filtered.columns)
+            if "aantal_huizen" in available_cols:
+                col_panden = "aantal_huizen"
+            elif "aantal_VBOs" in available_cols:
+                col_panden = "aantal_VBOs"
 
+            use_area = col_area in available_cols
+            use_density_col = col_density in available_cols
+
+            base_cols = [col_wp, col_mwh]
+            use_panden = col_panden is not None
+            if use_panden:
+                base_cols.append(col_panden)
+            if use_area:
+                base_cols.append(col_area)
+            if use_density_col and not use_area:
+                # alleen meenemen als area ontbreekt; anders berekenen we het zelf
+                base_cols.append(col_density)
+
+            if set(base_cols) <= available_cols:
+                df_wp = df_filtered.loc[:, base_cols]
+            else:
+                missing_cols = set(base_cols) - available_cols
+                if missing_cols:
+                    # kan gebeuren bij lege datasets; maak lege df
+                    df_wp = pd.DataFrame(columns=base_cols)
+                else:
+                    df_wp = df_filtered.loc[:, base_cols]
+
+            if not df_wp.empty:
+                s = pd.to_numeric(df_wp[col_mwh], errors="coerce").fillna(0)
+                df_wp = df_wp.assign(**{col_mwh: s})
+
+                agg_map = {col_mwh: "sum"}
+                if use_panden and col_panden:
+                    df_wp[col_panden] = pd.to_numeric(
+                        df_wp[col_panden], errors="coerce"
+                    ).fillna(0)
+                    agg_map[col_panden] = "sum"
+                if use_area:
+                    area_series = (
+                        pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
+                    )
+                    df_wp[col_area] = area_series
+                    agg_map[col_area] = "sum"
+                    density_source = "area"
+                elif use_density_col:
+                    density_series = pd.to_numeric(df_wp[col_density], errors="coerce")
+                    df_wp[col_density] = density_series
+                    agg_map[col_density] = "mean"
+                    density_source = "col"
+                else:
+                    density_source = None
+
+                top_wp = (
+                    df_wp.groupby(col_wp, as_index=False, sort=False, observed=True)
+                    .agg(agg_map)
+                    .rename(columns={col_mwh: "MWh"})
+                    .sort_values("MWh", ascending=False)
+                    .head(15)
+                )
+                top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
+
+                if use_area and col_area in top_wp.columns:
+                    top_wp.rename(columns={col_area: area_display_col}, inplace=True)
+                    area_vals = top_wp[area_display_col].replace({0: pd.NA})
+                    top_wp[density_display_col] = top_wp["MWh"].div(area_vals)
+                elif density_source == "col" and col_density in top_wp.columns:
+                    top_wp.rename(
+                        columns={col_density: density_display_col}, inplace=True
+                    )
+                else:
+                    # geen bron beschikbaar; maak lege kolom
+                    top_wp[density_display_col] = pd.NA
+
+                if use_panden and col_panden and col_panden in top_wp.columns:
+                    top_wp.rename(columns={col_panden: "Panden"}, inplace=True)
+
+        if top_wp is None or top_wp.empty:
+            st.info("Geen gegevens om te tonen.")
+        else:
             type_col_woningen = "Woningen"
             type_col_bedrijven = "Bedrijven"
             type_col_panden = "Panden"
@@ -952,9 +989,7 @@ def render_tabs(
                     _normalize_woonplaats
                 )
                 top_wp = top_wp.merge(
-                    counts_wp[
-                        ["woonplaats_norm", "woningen", "bedrijven"]
-                    ],
+                    counts_wp[["woonplaats_norm", "woningen", "bedrijven"]],
                     on="woonplaats_norm",
                     how="left",
                 )
@@ -965,8 +1000,6 @@ def render_tabs(
                     },
                     inplace=True,
                 )
-            if use_panden and col_panden and col_panden in top_wp.columns:
-                top_wp.rename(columns={col_panden: type_col_panden}, inplace=True)
             if "woonplaats_norm" in top_wp.columns:
                 top_wp.drop(columns=["woonplaats_norm"], inplace=True)
 
@@ -1043,9 +1076,9 @@ def render_tabs(
                         breakdown.drop(columns=["woonplaats_norm"], inplace=True)
                     if not breakdown.empty:
                         type_map = {
-                            "A": "A - Woningen",
-                            "B": "B - Bedrijven",
-                            "C": "C - Woningen en bedrijven",
+                            "A": "A - Kleinverbruik",
+                            "B": "B - Middel- en grootverbruik",
+                            "C": "C - Klein-, middel- en grootverbruik",
                         }
                         breakdown["Type pand"] = (
                             breakdown["type_code"].map(type_map).fillna(
@@ -1070,8 +1103,6 @@ def render_tabs(
                         rename_map = {
                             "aantal_panden": "Panden",
                         }
-                        area_display_col = "Gebiedsoppervlakte (ha)"
-                        density_display_col = "Warmtevraag per ha (MWh)"
                         if "area_ha" in breakdown.columns:
                             rename_map["area_ha"] = area_display_col
                         if "MWh_per_ha" in breakdown.columns:
@@ -1118,10 +1149,8 @@ def render_tabs(
                         st.info("Geen gegevens om te tonen.")
                 else:
                     st.info("Geen gegevens om te tonen.")
-        else:
-            st.info("Geen gegevens om te tonen.")
 
-# --- TAB 2: Warmtenet inzicht ---
+    # --- TAB 2: Warmtenet inzicht ---
     if show_comparison_tab:
         with tabs[tab_idx]:
             if not zoom_ok:
