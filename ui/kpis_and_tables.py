@@ -1012,6 +1012,8 @@ def render_tabs(
                 ordered_cols.append(type_col_bedrijven)
             if area_display_col in top_wp.columns:
                 ordered_cols.append(area_display_col)
+            if density_display_col in top_wp.columns:
+                ordered_cols.append(density_display_col)
             top_wp = top_wp.loc[:, [c for c in ordered_cols if c in top_wp.columns]]
 
             tab_total, tab_type = st.tabs(
@@ -1044,6 +1046,10 @@ def render_tabs(
                 if area_display_col in top_wp_fmt.columns:
                     top_wp_fmt[area_display_col] = top_wp_fmt[
                         area_display_col
+                    ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+                if density_display_col in top_wp_fmt.columns:
+                    top_wp_fmt[density_display_col] = top_wp_fmt[
+                        density_display_col
                     ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
                 _render_wrapped_table(top_wp_fmt, height=420)
 
@@ -1099,6 +1105,8 @@ def render_tabs(
                         }
                         if "area_ha" in breakdown.columns:
                             rename_map["area_ha"] = area_display_col
+                        if "MWh_per_ha" in breakdown.columns:
+                            rename_map["MWh_per_ha"] = density_display_col
                         breakdown.rename(columns=rename_map, inplace=True)
 
                         ordered_cols = [
@@ -1109,6 +1117,8 @@ def render_tabs(
                         ]
                         if area_display_col in breakdown.columns:
                             ordered_cols.append(area_display_col)
+                        if density_display_col in breakdown.columns:
+                            ordered_cols.append(density_display_col)
 
                         breakdown = breakdown.loc[
                             :, [c for c in ordered_cols if c in breakdown.columns]
@@ -1128,6 +1138,10 @@ def render_tabs(
                         if area_display_col in breakdown_fmt.columns:
                             breakdown_fmt[area_display_col] = breakdown_fmt[
                                 area_display_col
+                            ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
+                        if density_display_col in breakdown_fmt.columns:
+                            breakdown_fmt[density_display_col] = breakdown_fmt[
+                                density_display_col
                             ].map(lambda v: "" if pd.isna(v) else _fmt2(float(v)))
 
                         _render_wrapped_table(breakdown_fmt, height=420)
