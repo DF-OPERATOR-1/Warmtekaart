@@ -538,31 +538,31 @@ def create_layers_by_zoom(
     if zoom_level <= 3:
         layers.append(
             create_main_layer(
-                data_hex_df, show_main, extruded, zoom_level, 0.01, layer_opacity
+                data_hex_df, show_main, extruded, zoom_level, 0.04, layer_opacity
             )
         )
     elif 4 <= zoom_level <= 7:
         layers.append(
             create_main_layer(
-                data_hex_df, show_main, extruded, zoom_level, 0.05, layer_opacity
+                data_hex_df, show_main, extruded, zoom_level, 0.20, layer_opacity
             )
         )
     elif 8 <= zoom_level <= 11:
         layers.append(
             create_main_layer(
-                data_hex_df, show_main, extruded, zoom_level, 0.08, layer_opacity
+                data_hex_df, show_main, extruded, zoom_level, 0.32, layer_opacity
             )
         )
     elif zoom_level == 12:
         layers.append(
             create_main_layer(
-                data_hex_df, show_main, extruded, zoom_level, 0.10, layer_opacity
+                data_hex_df, show_main, extruded, zoom_level, 0.40, layer_opacity
             )
         )
     else:  # zoom_level >= 13
         layers.append(
             create_main_layer(
-                data_hex_df, show_main, extruded, zoom_level, 0.12, layer_opacity
+                data_hex_df, show_main, extruded, zoom_level, 0.48, layer_opacity
             )
         )
     return layers
