@@ -504,6 +504,7 @@ def _build_filters_snapshot(ui: dict) -> dict:
         "cap_buildings": _as_int(
             ui.get("cap_buildings", st.session_state.get("cap_buildings", 1_000))
         ),
+        "wegennet_all": bool(ui.get("wegennet_all", False)),
     }
 
 
@@ -566,6 +567,9 @@ def _build_report_filters_snapshot(ui: dict) -> dict:
                     "wegennet_wp_selectie",
                     st.session_state.get("wegennet_wp_selectie", []),
                 )
+            ),
+            "wegennet_all": bool(
+                ui.get("wegennet_all", st.session_state.get("wegennet_all", False))
             ),
             "wegennet_type_selectie": _as_sorted_list(
                 ui.get(
@@ -1222,20 +1226,22 @@ if should_compute:
     
         wegennet_layers: list[pdk.Layer] = []
         wegennet_wp = ui.get("wegennet_wp_selectie", [])
+        wegennet_all = bool(ui.get("wegennet_all", False))
         wegennet_cfg = LAYER_CFG.get("wegennet", {})
         min_zoom = int(wegennet_cfg.get("min_zoom", 11))
-        gemeente_sel = st.session_state.get("gemeente_selectie", [])
         if (
             ui.get("show_wegennet")
-            and wegennet_wp
             and int(ui.get("zoom_level", 0)) >= min_zoom
-            and len(gemeente_sel) == 1
+            and (wegennet_all or wegennet_wp)
         ):
             coord_precision = int(wegennet_cfg.get("coord_precision", 4))
-            wegennet_paths = resolve_wegennet_paths(wegennet_wp)
-            if not wegennet_paths:
-                wegennet_path = resolve_wegennet_path(gemeente_sel[0])
-                wegennet_paths = [wegennet_path]
+            if wegennet_all:
+                wegennet_paths = [resolve_wegennet_path(None)]
+            else:
+                wegennet_paths = resolve_wegennet_paths(wegennet_wp)
+                if not wegennet_paths:
+                    wegennet_path = resolve_wegennet_path(None)
+                    wegennet_paths = [wegennet_path]
             feats: list[dict] = []
             for path in wegennet_paths:
                 gjson_part = load_geojson(

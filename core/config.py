@@ -175,7 +175,7 @@ LAYER_CFG = {
         "legend_title": "Warmtenet op basis van warmtevraag",
         "line_width": 2.0,
         "default_opacity": 0.8,
-        "min_zoom": 11,
+        "min_zoom": 9,
         "coord_precision": 4,
         "default_color": [120, 120, 120, 200],
         "type_colors": {

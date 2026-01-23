@@ -864,101 +864,16 @@ def build_sidebar(
                         f"Warmtenet op basis van warmtevraag wordt pas getoond vanaf zoomniveau {min_zoom}."
                     )
                 else:
-                    geselecteerde_gemeenten = st.session_state.get(
-                        "gemeente_selectie", []
+                    show_all = st.toggle(
+                        "Toon heel Fryslan",
+                        value=bool(st.session_state.get("wegennet_all", False)),
+                        help="Negeer woonplaatsfilter en toon het warmtenet voor heel Fryslan.",
                     )
-                    no_data_warning = True
-                    if geselecteerde_gemeenten and len(geselecteerde_gemeenten) != 1:
-                        st.warning(
-                            "Wegennet wordt alleen getoond bij één gemeente. Ga naar Filters en kies één gemeente om deze laag te zien."
-                        )
-                        wp_options = []
-                        no_data_warning = False
-                    else:
-                        gemeente_naam = (
-                            geselecteerde_gemeenten[0]
-                            if geselecteerde_gemeenten
-                            else ""
-                        )
-                        wp_options = list_wegennet_woonplaatsen()
-                        if not wp_options:
-                            wegennet_path = resolve_wegennet_path(gemeente_naam)
-                            wp_options = geojson_unique_props(
-                                wegennet_path, "area_name"
-                            )
-                    if (
-                        "gemeentenaam" in df_in.columns
-                        and len(geselecteerde_gemeenten) == 1
-                        and wp_options
-                    ):
-                        mask = (
-                            df_in["gemeentenaam"]
-                            .astype(str)
-                            .isin(geselecteerde_gemeenten)
-                        )
-                        allowed_wp = {
-                            str(w)
-                            for w in df_in.loc[mask, "woonplaats"].dropna().unique()
-                        }
-                        if allowed_wp:
-                            allowed_norm = {
-                                normalize_wegennet_name(w) for w in allowed_wp
-                            }
-                            wp_options = [
-                                w
-                                for w in wp_options
-                                if normalize_wegennet_name(w) in allowed_norm
-                            ]
-
-                    if not wp_options:
-                        if no_data_warning:
-                            st.warning("Geen wegennetdata gevonden voor deze gemeente.")
+                    ui["wegennet_all"] = show_all
+                    st.session_state["wegennet_all"] = show_all
+                    if show_all:
                         st.session_state["wegennet_wp_selectie"] = []
                         ui["wegennet_wp_selectie"] = []
-                        st.session_state.setdefault("wegennet_type_selectie", [])
-                        ui["wegennet_type_selectie"] = st.session_state.get(
-                            "wegennet_type_selectie", []
-                        )
-                        ui["wegennet_opacity"] = st.session_state.setdefault(
-                            "wegennet_opacity", default_wegennet_opacity
-                        )
-                    else:
-                        prev_wp = [
-                            w
-                            for w in st.session_state.get("wegennet_wp_selectie", [])
-                            if w in wp_options
-                        ]
-                        option_by_norm = {
-                            normalize_wegennet_name(w): w for w in wp_options
-                        }
-                        base_default = [
-                            option_by_norm.get(normalize_wegennet_name(w))
-                            for w in st.session_state.get("woonplaats_selectie", [])
-                        ]
-                        base_default = [w for w in base_default if w in wp_options]
-                        sync_sig = tuple(base_default)
-                        if st.session_state.get("_wegennet_wp_sync") != sync_sig:
-                            st.session_state["wegennet_wp_selectie"] = list(
-                                base_default
-                            )
-                            st.session_state["_wegennet_wp_sync"] = sync_sig
-                        if st.session_state.get("wegennet_wp_selectie") is None:
-                            st.session_state["wegennet_wp_selectie"] = list(
-                                prev_wp or base_default or wp_options
-                            )
-                        def _format_woonplaats_label(value: str) -> str:
-                            cleaned = value.replace("_", " ").strip()
-                            if cleaned.islower():
-                                return cleaned.title()
-                            return cleaned
-
-                        wp_selectie = st.multiselect(
-                            "Filter op woonplaats",
-                            options=wp_options,
-                            key="wegennet_wp_selectie",
-                            format_func=_format_woonplaats_label,
-                        )
-                        ui["wegennet_wp_selectie"] = wp_selectie
 
                         type_opts = (
                             wegennet_meta.get("types", []) if wegennet_meta else []
@@ -1018,12 +933,185 @@ def build_sidebar(
                                 type_label_map.get(str(t).lower(), t) for t in type_opts
                             ]
                             render_mini_legend(
-                                cfg_wegennet.get("legend_title", "Wegennet"),
+                                LAYER_CFG["wegennet"]["legend_title"],
                                 legend_colors,
                                 legend_labels,
                                 dark_mode=dark_mode,
                                 footer_html="",
                             )
+                    else:
+                        geselecteerde_gemeenten = st.session_state.get(
+                            "gemeente_selectie", []
+                        )
+                        no_data_warning = True
+                    if not show_all:
+                        if geselecteerde_gemeenten and len(geselecteerde_gemeenten) != 1:
+                            st.warning(
+                                "Wegennet wordt alleen getoond bij één gemeente. Ga naar Filters en kies één gemeente om deze laag te zien."
+                            )
+                            wp_options = []
+                            no_data_warning = False
+                        else:
+                            gemeente_naam = (
+                                geselecteerde_gemeenten[0]
+                                if geselecteerde_gemeenten
+                                else ""
+                            )
+                            wp_options = list_wegennet_woonplaatsen()
+                            if not wp_options:
+                                wegennet_path = resolve_wegennet_path(gemeente_naam)
+                                wp_options = geojson_unique_props(
+                                    wegennet_path, "area_name"
+                                )
+                        if (
+                            "gemeentenaam" in df_in.columns
+                            and len(geselecteerde_gemeenten) == 1
+                            and wp_options
+                        ):
+                            mask = (
+                                df_in["gemeentenaam"]
+                                .astype(str)
+                                .isin(geselecteerde_gemeenten)
+                            )
+                            allowed_wp = {
+                                str(w)
+                                for w in df_in.loc[mask, "woonplaats"].dropna().unique()
+                            }
+                            if allowed_wp:
+                                allowed_norm = {
+                                    normalize_wegennet_name(w) for w in allowed_wp
+                                }
+                                wp_options = [
+                                    w
+                                    for w in wp_options
+                                    if normalize_wegennet_name(w) in allowed_norm
+                                ]
+
+                        if not wp_options:
+                            if no_data_warning:
+                                st.warning(
+                                    "Geen wegennetdata gevonden voor deze gemeente."
+                                )
+                            st.session_state["wegennet_wp_selectie"] = []
+                            ui["wegennet_wp_selectie"] = []
+                            st.session_state.setdefault("wegennet_type_selectie", [])
+                            ui["wegennet_type_selectie"] = st.session_state.get(
+                                "wegennet_type_selectie", []
+                            )
+                            ui["wegennet_opacity"] = st.session_state.setdefault(
+                                "wegennet_opacity", default_wegennet_opacity
+                            )
+                        else:
+                            prev_wp = [
+                                w
+                                for w in st.session_state.get(
+                                    "wegennet_wp_selectie", []
+                                )
+                                if w in wp_options
+                            ]
+                            option_by_norm = {
+                                normalize_wegennet_name(w): w for w in wp_options
+                            }
+                            base_default = [
+                                option_by_norm.get(normalize_wegennet_name(w))
+                                for w in st.session_state.get(
+                                    "woonplaats_selectie", []
+                                )
+                            ]
+                            base_default = [w for w in base_default if w in wp_options]
+                            sync_sig = tuple(base_default)
+                            if st.session_state.get("_wegennet_wp_sync") != sync_sig:
+                                st.session_state["wegennet_wp_selectie"] = list(
+                                    base_default
+                                )
+                                st.session_state["_wegennet_wp_sync"] = sync_sig
+                            if st.session_state.get("wegennet_wp_selectie") is None:
+                                st.session_state["wegennet_wp_selectie"] = list(
+                                    prev_wp or base_default or wp_options
+                                )
+                            def _format_woonplaats_label(value: str) -> str:
+                                cleaned = value.replace("_", " ").strip()
+                                if cleaned.islower():
+                                    return cleaned.title()
+                                return cleaned
+
+                            wp_selectie = st.multiselect(
+                                "Filter op woonplaats",
+                                options=wp_options,
+                                key="wegennet_wp_selectie",
+                                format_func=_format_woonplaats_label,
+                            )
+                            ui["wegennet_wp_selectie"] = wp_selectie
+
+                            type_opts = (
+                                wegennet_meta.get("types", []) if wegennet_meta else []
+                            )
+                            if not type_opts:
+                                cfg_types = (
+                                    LAYER_CFG.get("wegennet", {}).get("type_labels", {})
+                                    or {}
+                                ).keys()
+                                type_opts = sorted({str(t).lower() for t in cfg_types})
+                            prev_type_sel = [
+                                t
+                                for t in st.session_state.get(
+                                    "wegennet_type_selectie", []
+                                )
+                                if t in type_opts
+                            ]
+                            default_type_sel = prev_type_sel or type_opts
+                            type_labels = (wegennet_meta or {}).get("type_labels", {})
+                            type_label_map = {
+                                str(k).lower(): v for k, v in type_labels.items()
+                            }
+                            type_selectie = st.multiselect(
+                                "Filter op type:",
+                                options=type_opts,
+                                default=default_type_sel,
+                                format_func=lambda v: type_label_map.get(
+                                    str(v).lower(), v
+                                ),
+                            )
+                            st.session_state["wegennet_type_selectie"] = type_selectie
+                            ui["wegennet_type_selectie"] = type_selectie
+
+                            ui["wegennet_opacity"] = st.slider(
+                                "Transparantie warmtenet uit warmtevraag",
+                                min_value=0.1,
+                                max_value=1.0,
+                                value=float(
+                                    st.session_state.get(
+                                        "wegennet_opacity", default_wegennet_opacity
+                                    )
+                                ),
+                                step=0.05,
+                                key="wegennet_opacity",
+                                help=opacity_help,
+                            )
+
+                            cfg_wegennet = LAYER_CFG.get("wegennet", {})
+                            type_colors = cfg_wegennet.get("type_colors", {})
+                            if type_colors and type_opts:
+                                legend_colors = [
+                                    type_colors.get(
+                                        t,
+                                        cfg_wegennet.get(
+                                            "default_color", [120, 120, 120, 200]
+                                        ),
+                                    )
+                                    for t in type_opts
+                                ]
+                                legend_labels = [
+                                    type_label_map.get(str(t).lower(), t)
+                                    for t in type_opts
+                                ]
+                                render_mini_legend(
+                                    cfg_wegennet.get("legend_title", "Wegennet"),
+                                    legend_colors,
+                                    legend_labels,
+                                    dark_mode=dark_mode,
+                                    footer_html="",
+                                )
             else:
                 ui["wegennet_opacity"] = st.session_state.setdefault(
                     "wegennet_opacity", default_wegennet_opacity
