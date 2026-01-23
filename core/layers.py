@@ -8,7 +8,9 @@ import pydeck as pdk
 import streamlit as st
 from pyproj import Transformer
 
-from .config import LAYER_CFG, BASEMAP_CFG
+from shapely.geometry import box as shapely_box, mapping as shapely_mapping
+
+from .config import LAYER_CFG, BASEMAP_CFG, WOONPLAATS_GPKG_PATH
 from .utils import (
     get_layer_colors,
     get_dynamic_line_width,
@@ -29,6 +31,85 @@ if TYPE_CHECKING:
 
 
 _RD_TO_WGS84 = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
+
+
+@st.cache_data(show_spinner=False, max_entries=1, ttl=86400)
+def _load_friesland_union() -> object | None:
+    """Laad een geometrie-union van alle woonplaatsen (Friesland)."""
+    if not WOONPLAATS_GPKG_PATH or not WOONPLAATS_GPKG_PATH.exists():
+        return None
+    try:
+        import geopandas as gpd
+    except Exception:
+        return None
+    try:
+        gdf = gpd.read_file(WOONPLAATS_GPKG_PATH)
+    except Exception:
+        return None
+    if gdf.empty:
+        return None
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:28992", allow_override=True)
+    gdf = gdf.to_crs("EPSG:4326")
+    geom = gdf.unary_union
+    if geom is None or geom.is_empty:
+        return None
+    return geom
+
+
+def _wrap_geojson(geom) -> dict | None:
+    if geom is None or getattr(geom, "is_empty", True):
+        return None
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {}, "geometry": shapely_mapping(geom)}
+        ],
+    }
+
+
+def _load_friesland_geojson() -> dict | None:
+    geom = _load_friesland_union()
+    return _wrap_geojson(geom)
+
+
+def _load_friesland_mask_geojson() -> dict | None:
+    geom = _load_friesland_union()
+    if geom is None:
+        return None
+    minx, miny, maxx, maxy = geom.bounds
+    pad = 0.35
+    outer = shapely_box(minx - pad, miny - pad, maxx + pad, maxy + pad)
+    mask = outer.difference(geom)
+    return _wrap_geojson(mask)
+
+
+def build_friesland_mask_layer(
+    map_style: str | None = None, mode: str = "clip"
+) -> pdk.Layer | None:
+    """Maak een laag die Friesland clipt of juist Friesland afdekt."""
+    if mode not in {"clip", "inverse"}:
+        return None
+    geojson = (
+        _load_friesland_mask_geojson()
+        if mode == "clip"
+        else _load_friesland_geojson()
+    )
+    if not geojson:
+        return None
+    style_val = str(map_style or "").lower()
+    is_dark = "dark" in style_val
+    fill_color = [14, 17, 22] if is_dark else [245, 245, 245]
+    return pdk.Layer(
+        "GeoJsonLayer",
+        geojson,
+        name="Friesland mask",
+        pickable=False,
+        stroked=False,
+        filled=True,
+        get_fill_color=fill_color,
+        opacity=0.9,
+    )
 
 
 # ------------------------------------------------------------

@@ -29,6 +29,7 @@ from core.config import (
 from core.utils import format_dutch_number, get_heat_color, build_deck_tooltip
 from core.layers import (
     build_base_layers,
+    build_friesland_mask_layer,
     create_layers_by_zoom,
     create_indicative_area_layer,
     create_site_layers,
@@ -1465,12 +1466,20 @@ if should_compute:
         hide_bg = bool(ui.get("hide_basemap"))
         basemap_style = ui.get("basemap_style", ui.get("map_style"))
         base_layers = build_base_layers(basemap_style, hide_bg)
+        clip_mode = ui.get("friesland_clip_mode", "none")
+        mask_layer = (
+            build_friesland_mask_layer(basemap_style, mode=clip_mode)
+            if clip_mode != "none"
+            else None
+        )
+        mask_layers = [mask_layer] if mask_layer else []
     
         label_layers = [pandtype_label_layer] if pandtype_label_layer else []
 
         # Volgorde: basemap -> woonlagen -> H3/indicatief/sites -> labels
         all_layers = (
             base_layers
+            + mask_layers
             + extra_layers
             + layers
             + wegennet_layers
