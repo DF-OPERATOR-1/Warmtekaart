@@ -707,12 +707,21 @@ def _build_warmtenet_report_tables(
         out_panden["% aangesloten"], 1, suffix="%"
     )
 
-    def _fmt_len_cost(length_val, cost_val, length_label: str, cost_label: str) -> str:
+    def _fmt_len_cost(
+        length_val,
+        cost_val,
+        length_label: str,
+        cost_label: str,
+        *,
+        length_placeholder: str | None = None,
+    ) -> str:
         length_txt = _format_series(pd.Series([length_val]), 0).iloc[0]
         cost_txt = _format_series(pd.Series([cost_val]), 0, prefix="€ ").iloc[0]
         parts = []
         if length_txt:
             parts.append(f"{length_label}: {length_txt}")
+        elif length_placeholder is not None:
+            parts.append(f"{length_label}: {length_placeholder}")
         if cost_txt:
             parts.append(f"{cost_label}: {cost_txt}")
         return "\n".join(parts)
@@ -720,29 +729,69 @@ def _build_warmtenet_report_tables(
     def _fmt_euro_only(value) -> str:
         return _format_series(pd.Series([value]), 0, prefix="€ ").iloc[0]
 
-    out_leidingen = pd.DataFrame(
+    out_leidingen_bron = pd.DataFrame(
         {
             "Woonplaats": merged["woonplaats_display"],
             "Type": "Bron",
             "Kosten netwerk": [
-                _fmt_len_cost(v_len, v_cost, "Netwerk (m)", "Kosten")
-                for v_len, v_cost in zip(
-                    warmtenet_lengte_m, kosten_net_warmtebron
+                _fmt_len_cost(
+                    None,
+                    v_cost,
+                    "Netwerk (m)",
+                    "Kosten",
+                    length_placeholder="-",
                 )
+                for v_cost in kosten_net_warmtebron
             ],
             "Kosten aansluiting": [
                 _fmt_len_cost(
-                    v_len, v_cost, "Aansluiting (m)", "Kosten"
+                    None,
+                    v_cost,
+                    "Aansluiting (m)",
+                    "Kosten",
+                    length_placeholder="-",
                 )
-                for v_len, v_cost in zip(
-                    warmtenet_conn_m, kosten_conn_warmtebron
-                )
+                for v_cost in kosten_conn_warmtebron
             ],
             "Totale kosten": [
                 _fmt_euro_only(v) for v in kosten_tot_warmtebron
             ],
         }
-    ).sort_values("Woonplaats")
+    )
+    out_leidingen_vraag = pd.DataFrame(
+        {
+            "Woonplaats": merged["woonplaats_display"],
+            "Type": "Vraag",
+            "Kosten netwerk": [
+                _fmt_len_cost(
+                    v_len,
+                    v_cost,
+                    "Netwerk (m)",
+                    "Kosten",
+                )
+                for v_len, v_cost in zip(
+                    wegennet_lengte_m, kosten_net_wegennet
+                )
+            ],
+            "Kosten aansluiting": [
+                _fmt_len_cost(
+                    v_len,
+                    v_cost,
+                    "Aansluiting (m)",
+                    "Kosten",
+                )
+                for v_len, v_cost in zip(
+                    wegennet_conn_m, kosten_conn_wegennet
+                )
+            ],
+            "Totale kosten": [
+                _fmt_euro_only(v) for v in kosten_tot_wegennet
+            ],
+        }
+    )
+    out_leidingen = pd.concat(
+        [out_leidingen_bron, out_leidingen_vraag], ignore_index=True
+    ).sort_values(["Woonplaats", "Type"])
 
     return out_warmte, out_panden, out_leidingen
 
@@ -2538,7 +2587,7 @@ def build_report_pdf(
                 caption_lines = None
                 if title == "Warmtenet_kosten":
                     caption_lines = [
-                        "Kostenberekening: €1000/m leidingnet en €346/m aansluitingen.",
+                        "Kostenberekening: €1.000/m leidingnet en €346/m aansluitingen.",
                     ]
                 fig, ax, caption_height = _start_warmtenet_fig(
                     background, show_title, title, caption_lines

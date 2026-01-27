@@ -712,7 +712,7 @@ def _render_warmtenet_comparison(
     )
 
     with tab_warmte:
-        st.caption("Warmtenet uit warmtebron is gecorrigeerd met 15% warmteverlies.")
+        st.caption("Warmtenet uit warmtebron is gecorrigeerd voor 15% warmteverlies.")
         out_warmte = pd.DataFrame(
             {
                 "Woonplaats": merged["woonplaats_display"],
@@ -770,10 +770,10 @@ def _render_warmtenet_comparison(
 
     with tab_leidingen:
         st.caption(
-            "Kostenberekening: €1000/m leidingnet en €346/m aansluitingen. "
-            "Warmtebron: gemiddeld 15 m per aansluiting."
+            "Kostenberekening: €1.000/m leidingnet en €346/m aansluitingen. "
+            "Warmtebron: vast bedrag van €5.190 per aansluiting."
         )
-        out_leidingen = pd.DataFrame(
+        out_leidingen_bron = pd.DataFrame(
             {
                 "Woonplaats": merged["woonplaats_display"],
                 "Type": "Bron",
@@ -783,12 +783,30 @@ def _render_warmtenet_comparison(
                 "Kosten\naansluiting": kosten_conn_warmtebron,
                 "Totale kosten": kosten_tot_warmtebron,
             }
-        ).sort_values(["Woonplaats", "Type"])
+        )
+        out_leidingen_vraag = pd.DataFrame(
+            {
+                "Woonplaats": merged["woonplaats_display"],
+                "Type": "Vraag",
+                "Netwerk (m)": wegennet_lengte_m,
+                "Aansluiting (m)": wegennet_conn_m,
+                "Kosten\nnetwerk": kosten_net_wegennet,
+                "Kosten\naansluiting": kosten_conn_wegennet,
+                "Totale kosten": kosten_tot_wegennet,
+            }
+        )
+        out_leidingen = pd.concat(
+            [out_leidingen_bron, out_leidingen_vraag], ignore_index=True
+        )
+        out_leidingen.loc[
+            out_leidingen["Type"] == "Bron", ["Netwerk (m)", "Aansluiting (m)"]
+        ] = np.nan
+        out_leidingen = out_leidingen.sort_values(["Woonplaats", "Type"])
         out_fmt = out_leidingen.copy()
         for col in ["Netwerk (m)", "Aansluiting (m)"]:
             s = pd.to_numeric(out_fmt[col], errors="coerce")
             out_fmt[col] = s.map(
-                lambda v: "" if pd.isna(v) else format_dutch_number(v, 0)
+                lambda v: "-" if pd.isna(v) else format_dutch_number(v, 0)
             )
         for col in [
             "Kosten\nnetwerk",
@@ -825,7 +843,7 @@ def render_tabs(
     """
     Tabs:
       - Top woonplaatsen (MWh)  [altijd]
-      - Kandidaat-voorzieningen [alleen als show_sites_layer]
+      - Kandidaat hotspots [alleen als show_sites_layer]
     RAM-zuinig: minimale kolomselecties, vectorized formatting.
     """
     if isinstance(sites_costed, list):
@@ -1290,7 +1308,7 @@ def render_tabs(
                 st.warning(warning_text)
         tab_idx += 1
 
-    # --- TAB 3: Kandidaat-voorzieningen ---
+    # --- TAB 3: Kandidaat hotspots ---
     if show_sites_layer:
         with tabs[tab_idx]:
             if sites_costed_df is not None and not sites_costed_df.empty:
