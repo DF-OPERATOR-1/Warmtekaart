@@ -863,7 +863,7 @@ def render_tabs(
     if show_comparison_tab:
         tab_labels.append("Warmtenet inzicht")
     if show_sites_layer:
-        tab_labels.append("Kandidaat-voorzieningen")
+        tab_labels.append("Kandidaat-hotspots")
     tabs = st.tabs(tab_labels)
     tab_idx = 0
     tab1 = tabs[tab_idx]
