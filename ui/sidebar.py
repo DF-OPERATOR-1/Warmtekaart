@@ -1609,7 +1609,7 @@ def build_sidebar(
             st.markdown(
                 """\
 **Doel van de analyse**  
-De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een buurtbron of warmtenet) kansrijk kan zijn. Dit gebeurt door te kijken hoeveel gasverbruik en gebouwen er binnen de directe omgeving van een mogelijke locatie liggen en of deze plek past binnen de capaciteit van een voorziening.
+De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een warmtenet) kansrijk kan zijn. Dit gebeurt door te kijken hoeveel gasverbruik en gebouwen er binnen de directe omgeving van een mogelijke locatie liggen en of deze plek past binnen de capaciteit van een potentiële bron.
 
 **Werkwijze in hoofdlijnen**  
 1. Rondom een centrale plek wordt gekeken naar omliggende buurten in de vorm van zeshoekige vakjes (hexagonen). De straal bepaalt hoe groot de omgeving is die wordt meegenomen.  

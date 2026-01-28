@@ -92,7 +92,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - Oppervlakte per woonplaats komt uit `data/layers/woonplaats_area.csv` (voorbewerkt).
 - Hexagonen zijn alleen visualisatie; H3-oppervlakte bepaalt MWh/ha op de kaart.
 - Voorbewerken om RAM te sparen: `python data/scripts/woonplaats_area_export.py`
-- Bronbestand voor export: `data/layers/BAG_Woonplaatsen_FRL-ruw.gpkg`
+- Bronbestand voor export: `data/layers/BAG_WOONPLAATSEN_EX_WATER.gpkg`
 
 ## Kaartlagen
 - Basislaag: warmtevraag (H3).

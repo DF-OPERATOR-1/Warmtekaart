@@ -729,13 +729,18 @@ def _build_warmtenet_report_tables(
     def _fmt_euro_only(value) -> str:
         return _format_series(pd.Series([value]), 0, prefix="€ ").iloc[0]
 
+    def _cost_to_length(value):
+        if value is None or pd.isna(value):
+            return None
+        return value / 1000.0
+
     out_leidingen_bron = pd.DataFrame(
         {
             "Woonplaats": merged["woonplaats_display"],
             "Type": "Bron",
             "Kosten netwerk": [
                 _fmt_len_cost(
-                    None,
+                    _cost_to_length(v_cost),
                     v_cost,
                     "Netwerk (m)",
                     "Kosten",

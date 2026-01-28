@@ -798,9 +798,14 @@ def _render_warmtenet_comparison(
         out_leidingen = pd.concat(
             [out_leidingen_bron, out_leidingen_vraag], ignore_index=True
         )
-        out_leidingen.loc[
-            out_leidingen["Type"] == "Bron", ["Netwerk (m)", "Aansluiting (m)"]
-        ] = np.nan
+        bron_mask = out_leidingen["Type"] == "Bron"
+        out_leidingen.loc[bron_mask, "Netwerk (m)"] = (
+            pd.to_numeric(
+                out_leidingen.loc[bron_mask, "Kosten\nnetwerk"], errors="coerce"
+            )
+            / 1000.0
+        )
+        out_leidingen.loc[bron_mask, "Aansluiting (m)"] = np.nan
         out_leidingen = out_leidingen.sort_values(["Woonplaats", "Type"])
         out_fmt = out_leidingen.copy()
         for col in ["Netwerk (m)", "Aansluiting (m)"]:
