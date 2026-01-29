@@ -322,10 +322,10 @@ with form:
     )
 
     st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
-    if disable_map_submit:
-        map_button_clicked = False
-    else:
-        map_button_clicked = st.form_submit_button("Maak kaart")
+    map_button_clicked = st.form_submit_button(
+        "Maak kaart",
+        disabled=disable_map_submit,
+    )
 
 _log_ram("after_sidebar")
 report_container = ui.get("report_slot_container")
