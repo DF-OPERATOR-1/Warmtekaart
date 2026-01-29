@@ -11,3 +11,4 @@ pypdf>=4.0
 reportlab>=4.0
 Pillow>=10.0
 shapely>=2.0
+pyproj>=3.6
