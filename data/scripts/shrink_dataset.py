@@ -4,6 +4,7 @@ Hulpscript om een compacte parquet-versie te maken voor de Streamlit-app.
 Het script houdt alleen de kolommen die de UI en analyses gebruiken, zet deze
 om naar compactere types en slaat het resultaat op naast de originele data.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -120,21 +121,15 @@ def _resolve_paths(source_arg: str | None, dest_arg: str | None) -> tuple[Path, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=(
-            "Maak een compacte parquet-versie op basis van parquet."
-        )
+        description=("Maak een compacte parquet-versie op basis van parquet.")
     )
     parser.add_argument(
         "--source",
-        help=(
-            "Pad naar input parquet. Standaard: data/safe file/data.parquet."
-        ),
+        help=("Pad naar input parquet. Standaard: data/safe file/data.parquet."),
     )
     parser.add_argument(
         "--dest",
-        help=(
-            "Pad naar output parquet. Standaard: data/data_compact.parquet."
-        ),
+        help=("Pad naar output parquet. Standaard: data/data_compact.parquet."),
     )
     args = parser.parse_args()
 

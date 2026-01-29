@@ -2,9 +2,7 @@
 import geopandas as gpd
 
 # 1. Laad GeoJSON
-gdf = gpd.read_file(
-    ""
-)
+gdf = gpd.read_file("")
 
 # 2. Zet CRS als het niet in het bestand staat
 gdf = gdf.set_crs("EPSG:28992")
@@ -19,7 +17,9 @@ gdf_4326.to_file("warmtenet_full.geojson", driver="GeoJSON")
 import gzip
 import shutil
 
-input_file = "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson"
+input_file = (
+    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson"
+)
 output_file = "warmtenet_full.geojson.gz"
 
 with open(input_file, "rb") as f_in:
@@ -28,7 +28,10 @@ with open(input_file, "rb") as f_in:
 
 # %% geojson.gz to parquet
 import geopandas as gpd
-INPUT = "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson.gz"
+
+INPUT = (
+    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson.gz"
+)
 OUTPUT = "warmtenet_full.parquet"
 
 # Gebruik GDAL gzip virtual filesystem
@@ -38,11 +41,7 @@ print("Reading GeoJSON.gz...")
 gdf = gpd.read_file(INPUT_VSI, engine="pyogrio")
 
 print("Writing GeoParquet...")
-gdf.to_parquet(
-    OUTPUT,
-    compression="zstd",
-    index=False
-)
+gdf.to_parquet(OUTPUT, compression="zstd", index=False)
 
 print("Done.")
 

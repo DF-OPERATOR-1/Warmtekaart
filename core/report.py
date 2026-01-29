@@ -1,3 +1,5 @@
+"""PDF-rapportage generatie en helpers."""
+
 # core/report.py
 from __future__ import annotations
 
@@ -41,7 +43,9 @@ _MAX_IMAGE_DPI = 300  # Max DPI voor ingesloten afbeeldingen om RAM te beperken.
 _JPEG_QUALITY = 80
 _TABEL_REGEL_AFSTAND = 1.5  # Regelafstand binnen tabelceltekst.
 _TABEL_LETTERGROOTTE = _STIJL["body_size"] + 1  # Lettergrootte voor tabellen.
-_TABEL_RIJ_HOOGTE = (_TABEL_LETTERGROOTTE / 72) / _STIJL["page_portrait"][1]  # Basisrijhoogte.
+_TABEL_RIJ_HOOGTE = (_TABEL_LETTERGROOTTE / 72) / _STIJL["page_portrait"][
+    1
+]  # Basisrijhoogte.
 _TABEL_RIJ_PADDING_FACTOR = 2.0  # Extra rijpadding (boven/onder) in rijhoogte-eenheden.
 
 _NEDERLANDSE_MAANDEN = {  # Nederlandse maandnamen voor datumopmaak.
@@ -59,10 +63,16 @@ _NEDERLANDSE_MAANDEN = {  # Nederlandse maandnamen voor datumopmaak.
     12: "december",
 }
 
-_ASSET_MAP = Path(__file__).resolve().parents[1] / "assets" / "report"  # Rapport-assets.
+_ASSET_MAP = (
+    Path(__file__).resolve().parents[1] / "assets" / "report"
+)  # Rapport-assets.
 _VOORBLAD_ACHTERGROND = _ASSET_MAP / "Voorblad.png"  # Achtergrond voor het voorblad.
-_SAMENVATTING_ACHTERGROND = _ASSET_MAP / "Samenvatting.png"  # Achtergrond voor samenvatting.
-_WOONPLAATSEN_ACHTERGROND = _ASSET_MAP / "Woonplaatsen.png"  # Achtergrond top woonplaatsen.
+_SAMENVATTING_ACHTERGROND = (
+    _ASSET_MAP / "Samenvatting.png"
+)  # Achtergrond voor samenvatting.
+_WOONPLAATSEN_ACHTERGROND = (
+    _ASSET_MAP / "Woonplaatsen.png"
+)  # Achtergrond top woonplaatsen.
 _WOONPLAATSEN_PAND_ACHTERGROND = _ASSET_MAP / "Woonplaatsen_pand.png"
 _WARMTENET_VRAAG_ACHTERGROND = _ASSET_MAP / "Warmtenet_vraag.png"
 _WARMTENET_PANDEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_panden.png"
@@ -70,10 +80,7 @@ _WARMTENET_KOSTEN_ACHTERGROND = _ASSET_MAP / "Warmtenet_kosten.png"
 _KAART_ACHTERGROND = _ASSET_MAP / "Kaart.png"  # Achtergrond kaartinstellingen.
 _LAAG_ACHTERGROND = _ASSET_MAP / "Laag.png"  # Achtergrond laaginstellingen.
 _EXTRAQT_LOGO_PAD = (  # EXTRAQT-logo gebruikt in de lagentabel.
-    Path(__file__).resolve().parents[1]
-    / "assets"
-    / "logo"
-    / "Logo EXTRAQT black.png"
+    Path(__file__).resolve().parents[1] / "assets" / "logo" / "Logo EXTRAQT black.png"
 )
 _SAMENVATTING_INDELING = {
     "created": {"x": 0.1004, "y": 0.857},  # "Aangemaakt op"-labelpositie.
@@ -241,9 +248,7 @@ def _wrap_table_cells(
     if df is None or df.empty:
         return df, []
     widths = col_widths or _table_column_widths(df)
-    col_char_widths = [
-        max(10, int(max_chars * width)) for width in (widths or [1.0])
-    ]
+    col_char_widths = [max(10, int(max_chars * width)) for width in (widths or [1.0])]
     wrapped = df.copy()
     for idx, col in enumerate(df.columns):
         width = col_char_widths[idx] if idx < len(col_char_widths) else max_chars
@@ -276,9 +281,7 @@ def _normalize_woonplaats(value: str | None) -> str:
 
 def _normalize_woonplaats_list(values: list[str] | None) -> set[str]:
     return {
-        _normalize_woonplaats(v)
-        for v in (values or [])
-        if _normalize_woonplaats(v)
+        _normalize_woonplaats(v) for v in (values or []) if _normalize_woonplaats(v)
     }
 
 
@@ -343,9 +346,7 @@ def _build_warmtenet_summary(gjson: dict | None) -> pd.DataFrame:
                 props.get("ingezet_mwh_per_jaar")
             )
         elif layer == "object":
-            entry["warmtenet_object_mwh"] += _to_float(
-                props.get("vraag_mwh_per_jaar")
-            )
+            entry["warmtenet_object_mwh"] += _to_float(props.get("vraag_mwh_per_jaar"))
             afstand_val = props.get("afstand_pad_m")
             if afstand_val not in (None, ""):
                 try:
@@ -403,6 +404,7 @@ def _build_warmtenet_summary(gjson: dict | None) -> pd.DataFrame:
 
     rows = []
     for wp_norm, entry in acc.items():
+
         def _sum_vals(values: set[float]) -> float | None:
             if not values:
                 return None
@@ -597,19 +599,16 @@ def _build_warmtenet_report_tables(
     warmtebron_mwh_loss = warmtebron_mwh * (1.0 - heat_loss_pct)
 
     basis_mwh = pd.to_numeric(merged.get("basis_vraag_mwh"), errors="coerce")
-    wegennet_mwh = (
-        pd.to_numeric(merged.get("wegennet_vraag_mwh"), errors="coerce")
-        .fillna(0.0)
-    )
+    wegennet_mwh = pd.to_numeric(
+        merged.get("wegennet_vraag_mwh"), errors="coerce"
+    ).fillna(0.0)
     basis_panden = pd.to_numeric(merged.get("basis_panden"), errors="coerce")
-    wegennet_panden = (
-        pd.to_numeric(merged.get("wegennet_aansluitingen"), errors="coerce")
-        .fillna(0.0)
-    )
-    warmtebron_panden = (
-        pd.to_numeric(merged.get("warmtenet_aangesloten_panden"), errors="coerce")
-        .fillna(0.0)
-    )
+    wegennet_panden = pd.to_numeric(
+        merged.get("wegennet_aansluitingen"), errors="coerce"
+    ).fillna(0.0)
+    warmtebron_panden = pd.to_numeric(
+        merged.get("warmtenet_aangesloten_panden"), errors="coerce"
+    ).fillna(0.0)
 
     onbenut_mwh = wegennet_mwh - warmtebron_mwh_loss
     dekking_pct = np.where(
@@ -660,9 +659,11 @@ def _build_warmtenet_report_tables(
     def _format_series(series, decimals: int, *, prefix: str = "", suffix: str = ""):
         s = pd.to_numeric(series, errors="coerce")
         return s.map(
-            lambda v: ""
-            if pd.isna(v)
-            else f"{prefix}{format_dutch_number(v, decimals)}{suffix}"
+            lambda v: (
+                ""
+                if pd.isna(v)
+                else f"{prefix}{format_dutch_number(v, decimals)}{suffix}"
+            )
         )
 
     out_warmte = pd.DataFrame(
@@ -682,9 +683,7 @@ def _build_warmtenet_report_tables(
         "Onbenut (MWh)",
     ]:
         out_warmte[col] = _format_series(out_warmte[col], 1)
-    out_warmte["Dekking (%)"] = _format_series(
-        out_warmte["Dekking (%)"], 1, suffix="%"
-    )
+    out_warmte["Dekking (%)"] = _format_series(out_warmte["Dekking (%)"], 1, suffix="%")
 
     out_panden = pd.DataFrame(
         {
@@ -758,9 +757,7 @@ def _build_warmtenet_report_tables(
                 )
                 for v_cost in kosten_conn_warmtebron
             ],
-            "Totale kosten": [
-                _fmt_euro_only(v) for v in kosten_tot_warmtebron
-            ],
+            "Totale kosten": [_fmt_euro_only(v) for v in kosten_tot_warmtebron],
         }
     )
     out_leidingen_vraag = pd.DataFrame(
@@ -774,9 +771,7 @@ def _build_warmtenet_report_tables(
                     "Netwerk (m)",
                     "Kosten",
                 )
-                for v_len, v_cost in zip(
-                    wegennet_lengte_m, kosten_net_wegennet
-                )
+                for v_len, v_cost in zip(wegennet_lengte_m, kosten_net_wegennet)
             ],
             "Kosten aansluiting": [
                 _fmt_len_cost(
@@ -785,13 +780,9 @@ def _build_warmtenet_report_tables(
                     "Aansluiting (m)",
                     "Kosten",
                 )
-                for v_len, v_cost in zip(
-                    wegennet_conn_m, kosten_conn_wegennet
-                )
+                for v_len, v_cost in zip(wegennet_conn_m, kosten_conn_wegennet)
             ],
-            "Totale kosten": [
-                _fmt_euro_only(v) for v in kosten_tot_wegennet
-            ],
+            "Totale kosten": [_fmt_euro_only(v) for v in kosten_tot_wegennet],
         }
     )
     out_leidingen = pd.concat(
@@ -826,9 +817,7 @@ def _expand_long_rows(
     return expanded
 
 
-def _row_weight(
-    values: list[Any], line_spacing: float, padding_weight: float
-) -> float:
+def _row_weight(values: list[Any], line_spacing: float, padding_weight: float) -> float:
     max_lines = 1
     for val in values:
         max_lines = max(max_lines, len(str(val).splitlines()))
@@ -1095,9 +1084,7 @@ def _overlay_map_image_on_pdf(
     summary_page_index: int | None,
     map_page_index: int | None,
 ) -> None:
-    if not map_image_path or (
-        summary_page_index is None and map_page_index is None
-    ):
+    if not map_image_path or (summary_page_index is None and map_page_index is None):
         return
     if not Path(map_image_path).exists():
         return
@@ -1167,7 +1154,9 @@ def _overlay_map_image_on_pdf(
             pass
 
 
-def _as_schaal(ax, x: float, y: float, width: float, height: float) -> tuple[float, float]:
+def _as_schaal(
+    ax, x: float, y: float, width: float, height: float
+) -> tuple[float, float]:
     try:
         (x0, y0) = ax.transData.transform((x, y))
         (x1, y1) = ax.transData.transform((x + width, y))
@@ -1311,7 +1300,11 @@ def _render_summary_page(
         ax.set_aspect("auto")
         ax.imshow(bg, extent=[0, 1, 0, 1], aspect="auto", interpolation="lanczos")
     for idx, (label, value, unit) in enumerate(kpis):
-        layout = _SAMENVATTING_INDELING["kpi_left"] if idx == 0 else _SAMENVATTING_INDELING["kpi_right"]
+        layout = (
+            _SAMENVATTING_INDELING["kpi_left"]
+            if idx == 0
+            else _SAMENVATTING_INDELING["kpi_right"]
+        )
         ax.text(
             layout["x"],
             layout["label_y"],
@@ -1358,9 +1351,7 @@ def _render_summary_page(
     )
     if map_image:
         try:
-            img = _load_image_from_bytes(
-                map_image, max_side_px=image_max_side_px
-            )
+            img = _load_image_from_bytes(map_image, max_side_px=image_max_side_px)
             _draw_image_cover(
                 ax,
                 img,
@@ -1424,9 +1415,9 @@ def _compute_totals(
     if df_filtered is None or df_filtered.empty:
         return 0, 0, 0, 0, 0
     if "aantal_huizen" in df_filtered.columns:
-        s_panden = pd.to_numeric(
-            df_filtered["aantal_huizen"], errors="coerce"
-        ).fillna(0)
+        s_panden = pd.to_numeric(df_filtered["aantal_huizen"], errors="coerce").fillna(
+            0
+        )
         totaal_panden = int(s_panden.sum())
     else:
         totaal_panden = int(len(df_filtered))
@@ -1470,9 +1461,7 @@ def _build_top_woonplaatsen_table(
             .rename(columns={"woonplaats": "Woonplaats"})
         )
         if "area_ha" in top_wp.columns:
-            top_wp[area_display_col] = pd.to_numeric(
-                top_wp["area_ha"], errors="coerce"
-            )
+            top_wp[area_display_col] = pd.to_numeric(top_wp["area_ha"], errors="coerce")
     else:
         if df_filtered is None or df_filtered.empty:
             return pd.DataFrame()
@@ -1507,9 +1496,7 @@ def _build_top_woonplaatsen_table(
         )
         top_wp.rename(columns={col_wp: "Woonplaats"}, inplace=True)
         if use_area and col_area in top_wp.columns:
-            top_wp[area_display_col] = pd.to_numeric(
-                top_wp[col_area], errors="coerce"
-            )
+            top_wp[area_display_col] = pd.to_numeric(top_wp[col_area], errors="coerce")
 
     if top_wp is None or top_wp.empty:
         return pd.DataFrame()
@@ -1554,9 +1541,7 @@ def _build_top_woonplaatsen_table(
     else:
         breakdown["area_ha"] = pd.NA
 
-    area_vals = pd.to_numeric(breakdown["area_ha"], errors="coerce").replace(
-        {0: pd.NA}
-    )
+    area_vals = pd.to_numeric(breakdown["area_ha"], errors="coerce").replace({0: pd.NA})
     breakdown["MWh_per_ha"] = breakdown["MWh"].div(area_vals)
 
     breakdown["type_order"] = breakdown["Type pand"].map(
@@ -1602,11 +1587,15 @@ def _build_top_woonplaatsen_pand_table(
     if top_wp is not None and "Woonplaats" in top_wp.columns:
         top_norms = top_wp["Woonplaats"].map(_normalize_woonplaats)
         top_order_map = {wp_norm: idx for idx, wp_norm in enumerate(top_norms)}
-        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(_normalize_woonplaats)
+        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(
+            _normalize_woonplaats
+        )
         breakdown = breakdown[breakdown["woonplaats_norm"].isin(set(top_norms))]
         breakdown["top_rank"] = breakdown["woonplaats_norm"].map(top_order_map)
     else:
-        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(_normalize_woonplaats)
+        breakdown["woonplaats_norm"] = breakdown["woonplaats"].map(
+            _normalize_woonplaats
+        )
         breakdown = breakdown.sort_values("woonplaats_norm").head(top_n * 3)
         breakdown["top_rank"] = (
             breakdown["woonplaats_norm"].factorize(sort=True)[0].astype(int)
@@ -1620,8 +1609,8 @@ def _build_top_woonplaatsen_pand_table(
         "B": "Middel- en grootverbruik",
         "C": "Klein-, middel- en grootverbruik",
     }
-    breakdown["Type pand"] = breakdown["type_code"].map(type_map).fillna(
-        breakdown["type_code"]
+    breakdown["Type pand"] = (
+        breakdown["type_code"].map(type_map).fillna(breakdown["type_code"])
     )
     breakdown["Woonplaats"] = breakdown["woonplaats"].astype(str).str.strip()
     breakdown["type_order"] = breakdown["type_code"].map({"A": 0, "B": 1, "C": 2})
@@ -1838,13 +1827,9 @@ def _render_table_page(
 
     row_lines = []
     if show_header:
-        row_lines.append(
-            _row_weight(header_labels, line_spacing, padding_weight)
-        )
+        row_lines.append(_row_weight(header_labels, line_spacing, padding_weight))
     for _, row in df_wrapped.iterrows():
-        row_lines.append(
-            _row_weight(row.tolist(), line_spacing, padding_weight)
-        )
+        row_lines.append(_row_weight(row.tolist(), line_spacing, padding_weight))
     total_weight = sum(row_lines) or 1
     base_row_height = None
     if max_row_height is not None:
@@ -1869,7 +1854,8 @@ def _render_table_page(
         return "\n".join(lines)
 
     cell_rows = [
-        [_normalize_currency_lines(v) for v in row] for row in df_wrapped.values.tolist()
+        [_normalize_currency_lines(v) for v in row]
+        for row in df_wrapped.values.tolist()
     ]
     table = ax.table(
         cellText=cell_rows,
@@ -1969,7 +1955,9 @@ def _render_table_page(
                 img_ratio = img.shape[1] / img.shape[0] if img.shape[0] else 1
                 width_scale = float(item.get("width_scale", 1.0))
                 box_height = row_height * height_ratio
-                box_height = min(box_height, text_height * 1.2 if text_height else box_height)
+                box_height = min(
+                    box_height, text_height * 1.2 if text_height else box_height
+                )
                 box_width = box_height * img_ratio * width_scale
                 x = x1 + pad_x
                 col_right = col_x + col_w
@@ -2279,7 +2267,11 @@ def build_report_pdf(
         idx for idx, (_, _, is_header) in enumerate(layers_rows) if is_header
     ]
     extraqt_row = next(
-        (idx for idx, (label, _, _) in enumerate(layers_rows) if label == "Aquathermie"),
+        (
+            idx
+            for idx, (label, _, _) in enumerate(layers_rows)
+            if label == "Aquathermie"
+        ),
         None,
     )
 
@@ -2362,15 +2354,17 @@ def build_report_pdf(
                 "Gebiedsoppervlakte (ha)": 0.26,
                 "Warmtevraag per ha (MWh)": 0.18,
             }
-            top_weights = [
-                top_wp_widths_map.get(col, 0.16) for col in top_wp.columns
-            ]
+            top_weights = [top_wp_widths_map.get(col, 0.16) for col in top_wp.columns]
             top_total = sum(top_weights)
             if top_total:
                 top_wp_col_widths = [w / top_total for w in top_weights]
-        max_row_height = _TABEL_RIJ_HOOGTE if _WOONPLAATSEN_ACHTERGROND.exists() else None
+        max_row_height = (
+            _TABEL_RIJ_HOOGTE if _WOONPLAATSEN_ACHTERGROND.exists() else None
+        )
         table_bbox = (
-            _WOONPLAATSEN_INDELING["table_bbox"] if _WOONPLAATSEN_ACHTERGROND.exists() else None
+            _WOONPLAATSEN_INDELING["table_bbox"]
+            if _WOONPLAATSEN_ACHTERGROND.exists()
+            else None
         )
         show_title = not _WOONPLAATSEN_ACHTERGROND.exists()
         show_header = True
@@ -2379,7 +2373,11 @@ def build_report_pdf(
                 "Top woonplaatsen (MWh)",
                 top_wp,
                 "Geen gegevens om te tonen.",
-                background=_WOONPLAATSEN_ACHTERGROND if _WOONPLAATSEN_ACHTERGROND.exists() else None,
+                background=(
+                    _WOONPLAATSEN_ACHTERGROND
+                    if _WOONPLAATSEN_ACHTERGROND.exists()
+                    else None
+                ),
                 image_max_side_px=image_max_side_px,
                 table_bbox=table_bbox,
                 show_title=show_title,
@@ -2407,7 +2405,11 @@ def build_report_pdf(
                     "Top woonplaatsen (MWh)",
                     chunk,
                     "Geen gegevens om te tonen.",
-                    background=_WOONPLAATSEN_ACHTERGROND if _WOONPLAATSEN_ACHTERGROND.exists() else None,
+                    background=(
+                        _WOONPLAATSEN_ACHTERGROND
+                        if _WOONPLAATSEN_ACHTERGROND.exists()
+                        else None
+                    ),
                     image_max_side_px=image_max_side_px,
                     table_bbox=table_bbox,
                     show_title=show_title,
@@ -2429,6 +2431,7 @@ def build_report_pdf(
             warmtenet_padding_weight = 1.2
             warmtenet_cell_pad = 0.03
             warmtenet_label_gap = _row_height_for_font(warmtenet_label_size) * 0.6
+
             def _start_warmtenet_fig(
                 background: Path,
                 show_title: bool,
@@ -2443,9 +2446,7 @@ def build_report_pdf(
                 ax.set_ylim(0, 1)
                 ax.axis("off")
                 bg = (
-                    _load_image_array(
-                        background, max_side_px=image_max_side_px
-                    )
+                    _load_image_array(background, max_side_px=image_max_side_px)
                     if background.exists()
                     else None
                 )
@@ -2507,9 +2508,11 @@ def build_report_pdf(
                         ),
                         show_title=not background.exists(),
                         show_header=True,
-                        max_row_height=_row_height_for_font(table_font_size)
-                        if background.exists()
-                        else None,
+                        max_row_height=(
+                            _row_height_for_font(table_font_size)
+                            if background.exists()
+                            else None
+                        ),
                         header_bg=_STIJL["brand_blue"],
                         header_text_color=_STIJL["row_bg"],
                         font_size=table_font_size,
@@ -2599,8 +2602,10 @@ def build_report_pdf(
                 )
                 y_top = table_bbox[1] + table_bbox[3]
                 y_bottom = table_bbox[1]
-                cursor = y_top - caption_height - (
-                    warmtenet_label_gap if caption_height else 0.0
+                cursor = (
+                    y_top
+                    - caption_height
+                    - (warmtenet_label_gap if caption_height else 0.0)
                 )
                 for wp, tbl in grouped:
                     label = str(wp).strip().upper() if group_by_woonplaats else ""
@@ -2629,8 +2634,10 @@ def build_report_pdf(
                         fig, ax, caption_height = _start_warmtenet_fig(
                             background, show_title, title, caption_lines
                         )
-                        cursor = y_top - caption_height - (
-                            warmtenet_label_gap if caption_height else 0.0
+                        cursor = (
+                            y_top
+                            - caption_height
+                            - (warmtenet_label_gap if caption_height else 0.0)
                         )
                     if label:
                         ax.text(
@@ -2679,16 +2686,18 @@ def build_report_pdf(
                 "Warmtenet_kosten", kosten_df, _WARMTENET_KOSTEN_ACHTERGROND
             )
 
-        kaart_bbox = _KAART_INDELING["table_bbox"] if _KAART_ACHTERGROND.exists() else None
+        kaart_bbox = (
+            _KAART_INDELING["table_bbox"] if _KAART_ACHTERGROND.exists() else None
+        )
         kaart_show_title = not _KAART_ACHTERGROND.exists()
         kaart_show_header = not _KAART_ACHTERGROND.exists()
-        kaart_max_row_height = _TABEL_RIJ_HOOGTE if _KAART_ACHTERGROND.exists() else None
+        kaart_max_row_height = (
+            _TABEL_RIJ_HOOGTE if _KAART_ACHTERGROND.exists() else None
+        )
         kaart_col_widths = [0.3, 0.7]
         kaart_chunks = [kaart_table]
         if kaart_bbox and kaart_max_row_height:
-            header_weight = (
-                1 + _TABEL_RIJ_PADDING_FACTOR if kaart_show_header else 0
-            )
+            header_weight = 1 + _TABEL_RIJ_PADDING_FACTOR if kaart_show_header else 0
             max_total_weight = (kaart_bbox[3] / kaart_max_row_height) - header_weight
             kaart_chunks = _split_table_by_weight(
                 kaart_table,
@@ -2737,7 +2746,9 @@ def build_report_pdf(
             "Geen gegevens om te tonen.",
             background=_LAAG_ACHTERGROND if _LAAG_ACHTERGROND.exists() else None,
             image_max_side_px=image_max_side_px,
-            table_bbox=_LAAG_INDELING["table_bbox"] if _LAAG_ACHTERGROND.exists() else None,
+            table_bbox=(
+                _LAAG_INDELING["table_bbox"] if _LAAG_ACHTERGROND.exists() else None
+            ),
             show_title=not _LAAG_ACHTERGROND.exists(),
             show_header=not _LAAG_ACHTERGROND.exists(),
             bold_first_col_rows=layers_bold_rows,

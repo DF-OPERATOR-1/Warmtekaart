@@ -34,7 +34,6 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 
 **Data paden + defaults**
 - core/config.py: bij *_PATH
-- core/config.py: WOONPLAATS_GPKG_PATH / WARMTE_LYR_WOONPLAATSEN
 - core/config.py: WOONPLAATS_AREA_PATH / WARMTE_LYR_WOONPLAATSEN_AREA
 
 **DuckDB / DAL (filters & aggregaties)**

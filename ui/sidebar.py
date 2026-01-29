@@ -1,3 +1,5 @@
+"""Sidebar UI: filters, toggles en uitleg."""
+
 # ui/sidebar.py
 from __future__ import annotations
 
@@ -187,17 +189,13 @@ def _render_big_legend(
             ("300-500 MWh/ha", "Heel goed"),
             ("> 500 MWh/ha", "Altijd doen"),
         ]
-        info_text = "\n".join(
-            f"- **{rng}**: {uitleg}" for rng, uitleg in info_items
-        )
+        info_text = "\n".join(f"- **{rng}**: {uitleg}" for rng, uitleg in info_items)
         legend_rows = [
             (_rgba_to_css(color), label) for color, label in zip(MWH_HA_COLORS, labels)
         ]
         if show_threshold:
             pot_label_value = current_threshold_display
-            pot_label = (
-                f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
-            )
+            pot_label = f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} MWh/ha"
         else:
             pot_label = None
         title = "Warmtevraag (MWh/ha)"
@@ -214,9 +212,7 @@ def _render_big_legend(
         ]
         if show_threshold:
             pot_label_value = current_threshold_display
-            pot_label = (
-                f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
-            )
+            pot_label = f"Potentie grenswaarde: {format_dutch_number(pot_label_value, 0)} kWh/m²"
         else:
             pot_label = None
         title = "Warmtevraag (kWh/m²)"
@@ -347,7 +343,7 @@ def build_sidebar(
 
         # ---------------- Kaart ----------------
         with st.expander("Kaart", expanded=True):
-            
+
             ui["zoom_level"] = st.slider(
                 "Selecteer zoomniveau", min_value=9, max_value=12, value=10
             )
@@ -421,6 +417,8 @@ def build_sidebar(
         # ---------------- Lagen ----------------
         with st.expander("Lagen", expanded=True):
             st.subheader("Warmtevraag")
+            if st.session_state.pop("force_show_main_layer", False):
+                st.session_state["show_main_layer"] = True
             ui["show_main_layer"] = st.toggle(
                 "Gasverbruik", value=True, key="show_main_layer"
             )
@@ -506,9 +504,7 @@ def build_sidebar(
                             default_kwh, 0
                         )
                     else:
-                        parsed_val = parse_dutch_int(
-                            str(raw_val), fallback=default_kwh
-                        )
+                        parsed_val = parse_dutch_int(str(raw_val), fallback=default_kwh)
                         if parsed_val < min_threshold_display:
                             parsed_val = min_threshold_display
                         formatted_val = format_dutch_number(parsed_val, 0)
@@ -550,11 +546,7 @@ def build_sidebar(
             )
             all_types_label = "Klein-, middel- en grootverbruik"
             dataset_df = dal_query({}, "dataset_options")
-            typepand = [
-                str(x)
-                for x in dataset_df.get("Dataset", [])
-                if str(x).strip()
-            ]
+            typepand = [str(x) for x in dataset_df.get("Dataset", []) if str(x).strip()]
             typepand_opties = [all_types_label] + sorted(typepand)
             pand_selectie = st.selectbox(
                 "Selecteer type pand:",
@@ -632,7 +624,9 @@ def build_sidebar(
             )
             min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
             zoom_level = int(ui.get("zoom_level", 0))
-            water_pot_blocked = show_wegennet and is_leeuwarden and zoom_level >= min_zoom
+            water_pot_blocked = (
+                show_wegennet and is_leeuwarden and zoom_level >= min_zoom
+            )
             if water_pot_blocked:
                 if st.session_state.get(water_pot_key):
                     st.session_state[water_pot_key] = False
@@ -672,14 +666,16 @@ def build_sidebar(
                 )
                 selected_gemeenten = st.session_state.get("gemeente_selectie", [])
                 if selected_gemeenten:
-                    wp_df = dal_query({"gemeente": selected_gemeenten}, "options_woonplaats")
+                    wp_df = dal_query(
+                        {"gemeente": selected_gemeenten}, "options_woonplaats"
+                    )
                     allowed_wp = {
-                        str(w)
-                        for w in wp_df.get("woonplaats", [])
-                        if str(w).strip()
+                        str(w) for w in wp_df.get("woonplaats", []) if str(w).strip()
                     }
                     if allowed_wp:
-                        model_wp_options = [w for w in model_wp_options if w in allowed_wp]
+                        model_wp_options = [
+                            w for w in model_wp_options if w in allowed_wp
+                        ]
                 prev_model_wp = [
                     w
                     for w in st.session_state.get("warmtenet_wp_selectie", [])
@@ -913,6 +909,7 @@ def build_sidebar(
                             st.session_state["wegennet_wp_selectie"] = list(
                                 prev_wp or base_default or wp_options
                             )
+
                         def _format_woonplaats_label(value: str) -> str:
                             cleaned = value.replace("_", " ").strip()
                             if cleaned.islower():
@@ -1165,11 +1162,17 @@ def build_sidebar(
         with st.expander("Filters", expanded=False):
             st.subheader("Gemeente")
             gemeente_df = dal_query({}, "options_gemeente")
-            gemeente_opties = sorted([
-                str(x).strip() for x in gemeente_df.get("gemeentenaam", []) if str(x).strip()
-            ])
+            gemeente_opties = sorted(
+                [
+                    str(x).strip()
+                    for x in gemeente_df.get("gemeentenaam", [])
+                    if str(x).strip()
+                ]
+            )
             prev_gemeente_selectie = st.session_state.get("_prev_gemeente_selectie", [])
-            gemeente_default = [g for g in prev_gemeente_selectie if g in gemeente_opties]
+            gemeente_default = [
+                g for g in prev_gemeente_selectie if g in gemeente_opties
+            ]
             if not gemeente_default:
                 if "Leeuwarden" in gemeente_opties:
                     gemeente_default = ["Leeuwarden"]
@@ -1210,11 +1213,13 @@ def build_sidebar(
                 ui["gemeente_selectie"] = gemeente_selectie
 
             st.subheader("Woonplaats")
-            wp_filters = {"gemeente": gemeente_selectie} if ui["zoom_level"] > 10 else {}
+            wp_filters = (
+                {"gemeente": gemeente_selectie} if ui["zoom_level"] > 10 else {}
+            )
             wp_df = dal_query(wp_filters, "options_woonplaats")
-            woonplaatsen_sorted = sorted([
-                str(x).strip() for x in wp_df.get("woonplaats", []) if str(x).strip()
-            ])
+            woonplaatsen_sorted = sorted(
+                [str(x).strip() for x in wp_df.get("woonplaats", []) if str(x).strip()]
+            )
 
             if 1 <= ui["zoom_level"] <= 10:
                 _ = st.multiselect(
@@ -1249,7 +1254,11 @@ def build_sidebar(
             st.subheader("Energieklasse")
             en_filters = {
                 "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
-                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+                "woonplaats": (
+                    woonplaats_selectie
+                    if ui["zoom_level"] > 10
+                    else woonplaatsen_sorted
+                ),
             }
             energie_df = dal_query(en_filters, "options_energieklasse")
             energie_series = energie_df.get("Energieklasse", [])
@@ -1266,7 +1275,11 @@ def build_sidebar(
             st.subheader("Bouwjaar")
             bouwjaar_filters = {
                 "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
-                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+                "woonplaats": (
+                    woonplaats_selectie
+                    if ui["zoom_level"] > 10
+                    else woonplaatsen_sorted
+                ),
                 "energieklasse": energieklasse_selectie,
             }
             bouwjaar_df = dal_query(bouwjaar_filters, "bouwjaar_range")
@@ -1299,7 +1312,11 @@ def build_sidebar(
         if participatie_kpi_slot is not None:
             kpi_filters = {
                 "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
-                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+                "woonplaats": (
+                    woonplaats_selectie
+                    if ui["zoom_level"] > 10
+                    else woonplaatsen_sorted
+                ),
                 "energieklasse": energieklasse_selectie,
                 "bouwjaar_range": ui.get("bouwjaar_range"),
                 "pand_selectie": ui.get("pand_selectie"),
@@ -1334,7 +1351,7 @@ def build_sidebar(
                     "Warmte-hotspots", value=False, key="show_sites_layer"
                 )
                 if ui["show_sites_layer"] and not ui.get("show_main_layer"):
-                    st.session_state["show_main_layer"] = True
+                    st.session_state["force_show_main_layer"] = True
                     ui["show_main_layer"] = True
 
                 if ui["show_sites_layer"]:
@@ -1417,14 +1434,14 @@ def build_sidebar(
                             1,
                             key="min_sep",
                         )
-                        prev_n_sites = int(st.session_state.get("n_sites", 3))
+                        prev_n_sites = int(st.session_state.get("n_sites", 10))
                         if prev_n_sites > 20:
                             prev_n_sites = 20
                             st.session_state.n_sites = prev_n_sites
                         ui["n_sites"] = st.number_input(
                             "Aantal warmte-hotspots",
                             min_value=1,
-                            max_value=20,
+                            max_value=10,
                             value=prev_n_sites,
                             step=1,
                             key="n_sites",
@@ -1436,7 +1453,7 @@ def build_sidebar(
                     ui["cap_mwh"] = text_input_int(
                         "Capaciteit per voorziening (MWh)",
                         key="cap_mwh",
-                        default=100_000,
+                        default=50_000,
                     )
                     ui["cap_buildings"] = text_input_int(
                         "Maximaal aantal panden per voorziening",
@@ -1455,7 +1472,7 @@ def build_sidebar(
         report_slot_container = st.container()
         ui["report_slot_container"] = report_slot_container
 
-# ---------------- Uitleg-blokken ----------------
+        # ---------------- Uitleg-blokken ----------------
         st.header("Uitleg")
         with st.expander("Uitleg H3", expanded=False):
             st.write(
@@ -1501,6 +1518,7 @@ def render_report_section(
     with target:
         # ---------------- Rapport samenstellen ----------------
         with st.expander("Rapport samenstellen", expanded=False):
+
             def _cleanup_report_file():
                 report_path = st.session_state.get("report_pdf_path")
                 if report_path:
@@ -1616,7 +1634,9 @@ def render_report_section(
                 st.session_state["report_upload_key"] = upload_key + 1
                 _clear_report_cache()
             map_image = st.session_state.get("report_map_image_path")
-            map_image_name = st.session_state.get("report_map_image_name") or "kaart.png"
+            map_image_name = (
+                st.session_state.get("report_map_image_name") or "kaart.png"
+            )
             report_image_error = st.session_state.get("report_map_image_error")
             if report_image_error:
                 st.error(report_image_error)

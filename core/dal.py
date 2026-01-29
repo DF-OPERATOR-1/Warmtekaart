@@ -1,3 +1,5 @@
+"""DuckDB data-access laag (DAL) voor filters en aggregaties op data.parquet."""
+
 # core/dal.py
 from __future__ import annotations
 
@@ -17,13 +19,11 @@ def _data_path_str() -> str:
 
 @st.cache_resource
 def get_con() -> duckdb.DuckDBPyConnection:
-    """Create and cache a single DuckDB connection per process."""
+    """Maak en cache één DuckDB-verbinding per proces."""
     con = duckdb.connect(database=":memory:")
     con.execute("PRAGMA threads=1")
     path = _data_path_str().replace("'", "''")
-    con.execute(
-        f"CREATE OR REPLACE VIEW base AS SELECT * FROM read_parquet('{path}')"
-    )
+    con.execute(f"CREATE OR REPLACE VIEW base AS SELECT * FROM read_parquet('{path}')")
 
     try:
         con.create_function(
@@ -130,7 +130,7 @@ def _build_where(
 
 @st.cache_data(show_spinner=False, max_entries=64, ttl=900)
 def dal_query(filters: dict, mode: str) -> pd.DataFrame:
-    """Data access layer for all queries against data.parquet."""
+    """DAL-functie voor alle queries op data.parquet."""
     con = get_con()
 
     if mode == "options_gemeente":
@@ -221,13 +221,18 @@ def dal_query(filters: dict, mode: str) -> pd.DataFrame:
         sql = f"""
             SELECT
                 h3_cell_to_parent(h3_latlng_to_cell(latitude, longitude, {BASE_H3_RES}), {res}) AS h3_index,
-                SUM(gemiddeld_jaarverbruik_mWh) AS sum_mwh,
-                SUM(totale_oppervlakte) AS sum_area,
-                SUM(COALESCE(kWh_per_m2, 0)) AS sum_kwh,
-                COUNT(*) AS cnt,
-                AVG(bouwjaar) AS mean_bouwjaar,
-                SUM(COALESCE(aantal_VBOs, 0)) AS sum_vbos,
-                MIN(woonplaats) AS woonplaats
+                MIN(woonplaats) AS woonplaats,
+                SUM(gemiddeld_jaarverbruik_mWh) AS sum_mwh_raw,
+                ROUND(SUM(gemiddeld_jaarverbruik_mWh), 0) AS gemiddeld_jaarverbruik_mWh,
+                ROUND(SUM(totale_oppervlakte), 0) AS totale_oppervlakte,
+                CAST(ROUND(AVG(bouwjaar), 0) AS INTEGER) AS bouwjaar,
+                CAST(ROUND(SUM(COALESCE(aantal_VBOs, 0)), 0) AS INTEGER) AS aantal_VBOs,
+                CAST(COUNT(*) AS INTEGER) AS aantal_huizen,
+                ROUND(
+                    SUM(COALESCE(kWh_per_m2, 0))
+                    / NULLIF(COUNT(*), 0),
+                    0
+                ) AS kWh_per_m2
             FROM base
             {geo_where}
             GROUP BY h3_index

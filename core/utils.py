@@ -1,3 +1,5 @@
+"""Algemene helpers voor kleur, formatting en tooltips."""
+
 # core/utils.py
 from __future__ import annotations
 
@@ -224,8 +226,24 @@ def colorize_numeric_geojson(
         extra_html = extra_rows_fn(props) if extra_rows_fn else ""
         props["geo_extra_rows"] = extra_html
 
+        minimal_props = {
+            out_prop: props.get(out_prop),
+            "_value_display": props.get("_value_display"),
+            "_layer_label": props.get("_layer_label"),
+            "gemeentenaam": props.get("gemeentenaam", ""),
+            "buurtnaam": props.get("buurtnaam", ""),
+            "gemeente_row_display": props.get("gemeente_row_display", "block"),
+            "buurt_row_display": props.get("buurt_row_display", "block"),
+            "geo_section_display": "block",
+            "hex_section_display": "none",
+            "site_section_display": "none",
+            "geo_extra_rows": props.get("geo_extra_rows", ""),
+        }
+
         geom = feat.get("geometry")
-        feats_new.append({"type": "Feature", "properties": props, "geometry": geom})
+        feats_new.append(
+            {"type": "Feature", "properties": minimal_props, "geometry": geom}
+        )
 
     return {"type": "FeatureCollection", "features": feats_new}
 
@@ -450,7 +468,7 @@ def pct_color_from_breaks(v, breaks, colors):
     return colors[-1]
 
 
-@st.cache_data(show_spinner=False, max_entries=24)
+@st.cache_data(show_spinner=False, max_entries=8, ttl=3600)
 def colorize_geojson_cached(
     gjson: dict,
     prop_name: str,
@@ -498,8 +516,24 @@ def colorize_geojson_cached(
         props["hex_section_display"] = "none"
         props["site_section_display"] = "none"
 
+        minimal_props = {
+            out_prop: props.get(out_prop),
+            "_value_display": props.get("_value_display"),
+            "_layer_label": props.get("_layer_label", ""),
+            "buurtnaam": props.get("buurtnaam", ""),
+            "gemeentenaam": props.get("gemeentenaam", ""),
+            "geo_extra_rows": props.get("geo_extra_rows", ""),
+            "gemeente_row_display": props.get("gemeente_row_display", "block"),
+            "buurt_row_display": props.get("buurt_row_display", "block"),
+            "geo_section_display": "block",
+            "hex_section_display": "none",
+            "site_section_display": "none",
+        }
+
         geom = feat.get("geometry")  # geen diepe kopie
-        feats_new.append({"type": "Feature", "properties": props, "geometry": geom})
+        feats_new.append(
+            {"type": "Feature", "properties": minimal_props, "geometry": geom}
+        )
 
     return {"type": "FeatureCollection", "features": feats_new}
 

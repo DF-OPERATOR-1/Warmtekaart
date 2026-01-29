@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.config import WOONPLAATS_GPKG_PATH, WOONPLAATS_AREA_PATH
+from core.config import LAYERS_DIR, WOONPLAATS_AREA_PATH
 
 
 def _gpkg_geom_to_wkb(blob: bytes | memoryview | None) -> bytes | None:
@@ -60,9 +60,7 @@ def _build_area_df(gpkg_path: Path) -> pd.DataFrame:
     conn = sqlite3.connect(gpkg_path)
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns"
-        )
+        cur.execute("SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns")
         rows = cur.fetchall()
         picked = _pick_layer(rows)
         if not picked:
@@ -85,9 +83,7 @@ def _build_area_df(gpkg_path: Path) -> pd.DataFrame:
                     f"EPSG:{int(srs_id)}", "EPSG:28992", always_xy=True
                 )
 
-        cur.execute(
-            f'SELECT "{geom_col}", "{name_col}" FROM "{table_name}"'
-        )
+        cur.execute(f'SELECT "{geom_col}", "{name_col}" FROM "{table_name}"')
         records = []
         for geom_blob, name in cur.fetchall():
             if not name:
@@ -127,7 +123,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--input",
-        default=str(WOONPLAATS_GPKG_PATH),
+        default=str(LAYERS_DIR / "BAG_WOONPLAATSEN_EX_WATER.gpkg"),
         help="Pad naar de GPKG met woonplaatsgeometrie.",
     )
     parser.add_argument(

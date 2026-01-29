@@ -1,3 +1,5 @@
+"""IO-helpers voor GeoJSON/Parquet, caching en pad-resolutie."""
+
 # core/io.py
 import json
 import gzip
@@ -42,7 +44,7 @@ def _resolve_layer_path(path: Path) -> Path | None:
     return None
 
 
-@st.cache_data(show_spinner=False, max_entries=8, ttl=86400)
+@st.cache_data(show_spinner=False, max_entries=4, ttl=21600)
 def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, ttl=3600):
     """
     Laadt een GeoJSON- of Parquet-bestand als dict.

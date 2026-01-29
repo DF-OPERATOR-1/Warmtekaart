@@ -46,8 +46,6 @@ def _get_secret(var: str) -> str | None:
     return str(value).strip() or None
 
 
-
-
 def _env_path(var: str, default: Path) -> Path:
     """Verplicht pad. Laat een env-var het standaardpad overschrijven."""
     val = os.getenv(var)
@@ -87,10 +85,6 @@ WARMTENET_PATH = _env_path(
 WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz")
 WEGENNET_SUMMARY_PATH = _env_path(
     "WARMTE_WEGENNET_CSV", DATA_DIR / "wegennet" / "wegennet.csv"
-)
-WOONPLAATS_GPKG_PATH = _env_path(
-    "WARMTE_LYR_WOONPLAATSEN",
-    LAYERS_DIR / "BAG_WOONPLAATSEN_EX_WATER.gpkg",
 )
 WOONPLAATS_AREA_PATH = _env_path(
     "WARMTE_LYR_WOONPLAATSEN_AREA",
