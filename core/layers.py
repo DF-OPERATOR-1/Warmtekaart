@@ -720,9 +720,7 @@ def create_site_layers(
                 "fill_color": color,
             }
         )
-
-    # Dot markers verwijderd; de groene hexagonen bevatten de tooltipinformatie.
-
+        
     return site_layers
 
 

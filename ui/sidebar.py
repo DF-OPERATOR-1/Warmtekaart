@@ -1,7 +1,7 @@
 # ui/sidebar.py
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, List
 
 import base64
 from pathlib import Path
@@ -12,6 +12,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core.config import LAYER_CFG, BASEMAP_CFG
+from core.dal import dal_query
 from core.io import (
     resolve_wegennet_path,
     geojson_unique_props,
@@ -310,14 +311,13 @@ def _is_dark_color(color: str | None) -> bool:
 
 
 def build_sidebar(
-    df_in: pd.DataFrame,
+    df_in: pd.DataFrame | None = None,
     potential_meta: dict | None = None,
     warmtenet_meta: dict | None = None,
     wegennet_meta: dict | None = None,
-) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Bouwt de volledige sidebar en retourneert:
-      - df (gefilterd)
       - ui (dict met alle gekozen waarden)
     """
     # defaults + migratie van bestaande grenswaarde
@@ -549,34 +549,28 @@ def build_sidebar(
                 help=opacity_help,
             )
             all_types_label = "Klein-, middel- en grootverbruik"
-            if "Dataset" in df_in.columns:
-                dataset_series = df_in["Dataset"]
-                typepand = [
-                    str(x)
-                    for x in (
-                        dataset_series.cat.categories
-                        if hasattr(dataset_series, "cat")
-                        else dataset_series.dropna().unique()
-                    )
-                ]
-                typepand_opties = [all_types_label] + sorted(typepand)
-                pand_selectie = st.selectbox(
-                    "Selecteer type pand:",
-                    options=typepand_opties,
-                    key="pand_selectie",
+            dataset_df = dal_query({}, "dataset_options")
+            typepand = [
+                str(x)
+                for x in dataset_df.get("Dataset", [])
+                if str(x).strip()
+            ]
+            typepand_opties = [all_types_label] + sorted(typepand)
+            pand_selectie = st.selectbox(
+                "Selecteer type pand:",
+                options=typepand_opties,
+                key="pand_selectie",
+            )
+            ui["pand_selectie"] = pand_selectie
+            with st.expander("Uitleg over type pand"):
+                st.write(
+                    "Hier kun je een specifiek type pand (bron van de data) selecteren om alleen die gegevens op de kaart te tonen. "
+                    "Standaard staan alle types aan.\n\n"
+                    "**Beschikbare datalagen:**\n"
+                    "- **Liander / Stedin** – Kleinverbruik (woningen)\n"
+                    "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik (bedrijven)\n"
+                    "- **Alliander** – Middel- tot grootverbruik (bedrijven)\n"
                 )
-                ui["pand_selectie"] = pand_selectie
-                with st.expander("Uitleg over type pand"):
-                    st.write(
-                        "Hier kun je een specifiek type pand (bron van de data) selecteren om alleen die gegevens op de kaart te tonen. "
-                        "Standaard staan alle types aan.\n\n"
-                        "**Beschikbare datalagen:**\n"
-                        "- **Liander / Stedin** – Kleinverbruik (woningen)\n"
-                        "- **Verrijkte BAG (TNO)** – Middel- tot grootverbruik (bedrijven)\n"
-                        "- **Alliander** – Middel- tot grootverbruik (bedrijven)\n"
-                    )
-            else:
-                ui["pand_selectie"] = all_types_label
             if ui["show_indicative_layer"]:
                 with st.expander("Wat doet de grenswaarde?"):
                     st.write(
@@ -676,20 +670,16 @@ def build_sidebar(
                 model_wp_options = (
                     warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
                 )
-                if "gemeentenaam" in df_in.columns:
-                    selected_gemeenten = st.session_state.get("gemeente_selectie", [])
-                    if selected_gemeenten:
-                        mask = (
-                            df_in["gemeentenaam"].astype(str).isin(selected_gemeenten)
-                        )
-                        allowed_wp = {
-                            str(w)
-                            for w in df_in.loc[mask, "woonplaats"].dropna().unique()
-                        }
-                        if allowed_wp:
-                            model_wp_options = [
-                                w for w in model_wp_options if w in allowed_wp
-                            ]
+                selected_gemeenten = st.session_state.get("gemeente_selectie", [])
+                if selected_gemeenten:
+                    wp_df = dal_query({"gemeente": selected_gemeenten}, "options_woonplaats")
+                    allowed_wp = {
+                        str(w)
+                        for w in wp_df.get("woonplaats", [])
+                        if str(w).strip()
+                    }
+                    if allowed_wp:
+                        model_wp_options = [w for w in model_wp_options if w in allowed_wp]
                 prev_model_wp = [
                     w
                     for w in st.session_state.get("warmtenet_wp_selectie", [])
@@ -868,19 +858,14 @@ def build_sidebar(
                             wp_options = geojson_unique_props(
                                 wegennet_path, "area_name"
                             )
-                    if (
-                        "gemeentenaam" in df_in.columns
-                        and len(geselecteerde_gemeenten) == 1
-                        and wp_options
-                    ):
-                        mask = (
-                            df_in["gemeentenaam"]
-                            .astype(str)
-                            .isin(geselecteerde_gemeenten)
+                    if len(geselecteerde_gemeenten) == 1 and wp_options:
+                        wp_df = dal_query(
+                            {"gemeente": geselecteerde_gemeenten}, "options_woonplaats"
                         )
                         allowed_wp = {
                             str(w)
-                            for w in df_in.loc[mask, "woonplaats"].dropna().unique()
+                            for w in wp_df.get("woonplaats", [])
+                            if str(w).strip()
                         }
                         if allowed_wp:
                             allowed_norm = {
@@ -1176,77 +1161,62 @@ def build_sidebar(
                 ui["extra_opacity"] = st.session_state.setdefault("extra_opacity", 0.55)
 
         # ---------------- Filters ----------------
-        df_filtered = df_in
+        df_filtered = None
         with st.expander("Filters", expanded=False):
-            # Werk met één boolean mask i.p.v. herhaaldelijk df=df[...]
-            df = df_in  # Copy-on-write staat aan in io.py -> masken zijn zuinig
-
-            # Gemeente
             st.subheader("Gemeente")
-            gemeente_selectie: List[str] = []
-            gemeente_changed = False
-            mask_gemeente = pd.Series(True, index=df.index)
-            if "gemeentenaam" in df.columns:
-                gemeenten_series = df["gemeentenaam"]
-                if hasattr(gemeenten_series, "cat"):
-                    gemeente_opties = [str(x) for x in gemeenten_series.cat.categories]
+            gemeente_df = dal_query({}, "options_gemeente")
+            gemeente_opties = sorted([
+                str(x).strip() for x in gemeente_df.get("gemeentenaam", []) if str(x).strip()
+            ])
+            prev_gemeente_selectie = st.session_state.get("_prev_gemeente_selectie", [])
+            gemeente_default = [g for g in prev_gemeente_selectie if g in gemeente_opties]
+            if not gemeente_default:
+                if "Leeuwarden" in gemeente_opties:
+                    gemeente_default = ["Leeuwarden"]
+                elif gemeente_opties:
+                    gemeente_default = [gemeente_opties[0]]
                 else:
-                    gemeente_opties = sorted(
-                        {str(x) for x in gemeenten_series.dropna().unique()}
-                    )
-                prev_gemeente_selectie = st.session_state.get(
-                    "_prev_gemeente_selectie", []
-                )
-                gemeente_default = [
-                    g for g in prev_gemeente_selectie if g in gemeente_opties
-                ]
-                if not gemeente_default:
-                    if "Leeuwarden" in gemeente_opties:
-                        gemeente_default = ["Leeuwarden"]
-                    elif gemeente_opties:
-                        gemeente_default = [gemeente_opties[0]]
-                    else:
-                        gemeente_default = []
+                    gemeente_default = []
 
-                if ui["zoom_level"] <= 10:
-                    _ = st.multiselect(
-                        "Filter op gemeente:",
-                        options=gemeente_opties,
-                        default=gemeente_default,
-                        key="gemeente_selectie",
-                        disabled=True,
-                        help="Gemeentefilter is beschikbaar vanaf zoomniveau 11.",
-                    )
-                    mask_gemeente = pd.Series(True, index=df.index)
-                    gemeente_selectie = gemeente_default
-                else:
-                    gemeente_selectie = st.multiselect(
-                        "Filter op gemeente:",
-                        options=gemeente_opties,
-                        default=gemeente_default,
-                        key="gemeente_selectie",
-                    )
-                    if not gemeente_selectie:
-                        st.warning("Selecteer minimaal één gemeente.")
-                        gemeente_selectie = gemeente_default or gemeente_opties
-                    prev_gemeente_set = set(prev_gemeente_selectie or [])
-                    current_gemeente_set = set(gemeente_selectie)
-                    gemeente_changed = current_gemeente_set != prev_gemeente_set
-                    st.session_state["_prev_gemeente_selectie"] = gemeente_selectie
-                    mask_gemeente = gemeenten_series.astype(str).isin(gemeente_selectie)
+            if ui["zoom_level"] <= 10:
+                _ = st.multiselect(
+                    "Filter op gemeente:",
+                    options=gemeente_opties,
+                    default=gemeente_default,
+                    key="gemeente_selectie",
+                    disabled=True,
+                    help="Gemeentefilter is beschikbaar vanaf zoomniveau 11.",
+                )
+                gemeente_selectie = gemeente_default
+                gemeente_changed = False
+            else:
+                gemeente_selectie = st.multiselect(
+                    "Filter op gemeente:",
+                    options=gemeente_opties,
+                    default=gemeente_default,
+                    key="gemeente_selectie",
+                )
+                if not gemeente_selectie:
+                    st.warning("Selecteer minimaal één gemeente.")
+                    gemeente_selectie = gemeente_default or gemeente_opties
+                prev_gemeente_set = set(prev_gemeente_selectie or [])
+                current_gemeente_set = set(gemeente_selectie)
+                gemeente_changed = current_gemeente_set != prev_gemeente_set
+                st.session_state["_prev_gemeente_selectie"] = gemeente_selectie
+
             if ui["zoom_level"] <= 10:
                 ui["gemeente_selectie"] = []
             else:
                 ui["gemeente_selectie"] = gemeente_selectie
-            df = df[mask_gemeente]
 
-            # Woonplaats
             st.subheader("Woonplaats")
-            woonplaatsen = df["woonplaats"].dropna().unique().tolist()
-            woonplaatsen_sorted = sorted(woonplaatsen)
+            wp_filters = {"gemeente": gemeente_selectie} if ui["zoom_level"] > 10 else {}
+            wp_df = dal_query(wp_filters, "options_woonplaats")
+            woonplaatsen_sorted = sorted([
+                str(x).strip() for x in wp_df.get("woonplaats", []) if str(x).strip()
+            ])
 
             if 1 <= ui["zoom_level"] <= 10:
-                # op lager zoomniveau: Friesland geheel, geen multiselect nodig
                 _ = st.multiselect(
                     "Filter op woonplaats:",
                     options=woonplaatsen_sorted,
@@ -1255,7 +1225,6 @@ def build_sidebar(
                     help="Woonplaatsfilter is beschikbaar vanaf zoomniveau 11.",
                 )
                 woonplaats_selectie = woonplaatsen_sorted
-                mask_wp = df["woonplaats"].isin(woonplaats_selectie)
             else:
                 prev_wp = st.session_state.get("woonplaats_selectie", [])
                 prev_wp_filtered = [wp for wp in prev_wp if wp in woonplaatsen_sorted]
@@ -1273,53 +1242,75 @@ def build_sidebar(
                 if not woonplaats_selectie:
                     st.warning("Selecteer minimaal één woonplaats.")
                     woonplaats_selectie = woonplaatsen_sorted or ["Leeuwarden"]
-                mask_wp = df["woonplaats"].isin(woonplaats_selectie)
 
             ui["woonplaats_selectie"] = woonplaats_selectie
             st.session_state["woonplaats_selectie"] = woonplaats_selectie
-            df = df[mask_wp]
 
-            # Energieklasse
             st.subheader("Energieklasse")
-            df = _fillna_categorical(df, "Energieklasse", "Onbekend")
-            energieklassen = (
-                df["Energieklasse"].cat.categories
-                if hasattr(df["Energieklasse"], "cat")
-                else sorted(df["Energieklasse"].dropna().unique())
-            )
+            en_filters = {
+                "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
+                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+            }
+            energie_df = dal_query(en_filters, "options_energieklasse")
+            energie_series = energie_df.get("Energieklasse", [])
+            energieklassen = [str(x).strip() for x in energie_series if str(x).strip()]
             energieklasse_selectie = st.multiselect(
                 "Filter op energieklasse:",
-                options=[str(x) for x in energieklassen],
-                default=[str(x) for x in energieklassen],
+                options=energieklassen,
+                default=energieklassen,
             )
             if not energieklasse_selectie:
-                energieklasse_selectie = [str(x) for x in energieklassen]
-            mask_en = df["Energieklasse"].astype(str).isin(energieklasse_selectie)
-            df = df[mask_en]
+                energieklasse_selectie = energieklassen
             ui["energieklasse_selectie"] = energieklasse_selectie
 
-            # Bouwjaar
             st.subheader("Bouwjaar")
-            bouwjaar_num = pd.to_numeric(df["bouwjaar"], errors="coerce")
-            min_year = int(np.nanmin(bouwjaar_num.to_numpy()))
-            max_year = int(np.nanmax(bouwjaar_num.to_numpy()))
+            bouwjaar_filters = {
+                "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
+                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+                "energieklasse": energieklasse_selectie,
+            }
+            bouwjaar_df = dal_query(bouwjaar_filters, "bouwjaar_range")
+            try:
+                min_year_val = bouwjaar_df["min_year"].iloc[0]
+            except Exception:
+                min_year_val = None
+            try:
+                max_year_val = bouwjaar_df["max_year"].iloc[0]
+            except Exception:
+                max_year_val = None
+            try:
+                min_year = int(min_year_val)
+            except Exception:
+                min_year = 1900
+            try:
+                max_year = int(max_year_val)
+            except Exception:
+                max_year = 2025
+            if min_year > max_year:
+                min_year, max_year = 1900, 2025
             by_lo, by_hi = st.slider(
                 "Filter op bouwjaar:", min_year, max_year, (min_year, max_year)
             )
-            mask_by = (bouwjaar_num >= by_lo) & (bouwjaar_num <= by_hi)
-            df = df[mask_by]
             ui["bouwjaar_range"] = (by_lo, by_hi)
 
-            # Type pand (filter toepassen)
             pand_selectie = ui.get("pand_selectie", "Klein-, middel- en grootverbruik")
             if pand_selectie != "Klein-, middel- en grootverbruik":
-                if "Dataset" in df.columns:
-                    df = df[df["Dataset"].astype(str) == pand_selectie]
-            df_filtered = df
-
+                ui["pand_selectie"] = pand_selectie
         if participatie_kpi_slot is not None:
+            kpi_filters = {
+                "gemeente": gemeente_selectie if ui["zoom_level"] > 10 else [],
+                "woonplaats": woonplaats_selectie if ui["zoom_level"] > 10 else woonplaatsen_sorted,
+                "energieklasse": energieklasse_selectie,
+                "bouwjaar_range": ui.get("bouwjaar_range"),
+                "pand_selectie": ui.get("pand_selectie"),
+            }
+            summary_df = dal_query(kpi_filters, "woonplaats_summary")
+            if summary_df.empty:
+                df_kpi = pd.DataFrame(columns=["aantal_huizen", "sum_mwh_raw"])
+            else:
+                df_kpi = summary_df.rename(columns={"MWh": "sum_mwh_raw"})
             with participatie_kpi_slot:
-                render_participation_kpis(df_filtered, ui["participatie"])
+                render_participation_kpis(df_kpi, ui["participatie"])
 
         # ---------------- Warmtevraag hotspots ----------------
         selected_places_prior = ui.get("woonplaats_selectie") or st.session_state.get(
@@ -1461,6 +1452,54 @@ def build_sidebar(
                 ui["sites_hex_opacity"] = default_site_opacity
 
         # ---------------- Rapport samenstellen ----------------
+        report_slot_container = st.container()
+        ui["report_slot_container"] = report_slot_container
+
+# ---------------- Uitleg-blokken ----------------
+        st.header("Uitleg")
+        with st.expander("Uitleg H3", expanded=False):
+            st.write(
+                "H3 is een hexagonaal raster dat gebieden verdeelt in zeshoeken van verschillende resoluties. "
+                "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte."
+            )
+
+        with st.expander("Warmtevraag-hotspots", expanded=False):
+            st.markdown(
+                """\
+**Doel van de analyse**  
+De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een warmtenet) kansrijk kan zijn. Dit gebeurt door te kijken hoeveel gasverbruik en gebouwen er binnen de directe omgeving van een mogelijke locatie liggen en of deze plek past binnen de capaciteit van een potentiële bron.
+
+**Werkwijze in hoofdlijnen**  
+1. Rondom een centrale plek wordt gekeken naar omliggende buurten in de vorm van zeshoekige vakjes (hexagonen). De straal bepaalt hoe groot de omgeving is die wordt meegenomen.  
+2. Per locatie wordt berekend hoeveel gasverbruik en hoeveel gebouwen in die omgeving aanwezig zijn. Daarbij geldt een maximum: een voorziening kan maar een bepaalde hoeveelheid warmte leveren en een maximum aantal gebouwen aansluiten.  
+3. Alle locaties worden gerangschikt op de hoeveelheid warmte die daadwerkelijk kan worden aangesloten.  
+4. Vervolgens worden de beste locaties geselecteerd, met een minimale onderlinge afstand zodat voorzieningen niet te dicht bij elkaar liggen.  
+
+**Begrippen**  
+- **k-ring:** de directe omgeving van een plek, gemeten in stappen van hexagonen. Hoe hoger de waarde, hoe verder de omgeving reikt.  
+- **Minimale afstand tussen voorzieningen:** de onderlinge ruimte die wordt aangehouden, zodat meerdere voorzieningen niet op (bijna) dezelfde plek terechtkomen.  
+
+**Verschil tussen deze twee**  
+- De *k-ring* bepaalt hoe ver je kijkt om het totale gasverbruik en aantal gebouwen rond één plek te bepalen (de invloedsstraal van een plek).  
+- De *minimale afstand* zorgt ervoor dat twee geselecteerde voorzieningen niet te dicht naast elkaar komen te liggen (de spreiding tussen verschillende plekken).  
+
+**K-ring in de praktijk (k = 1 t/m 5)**  
+- **k = 1** – directe buren, circa 7 hexagonen. Denk aan een cluster van enkele panden binnen ~200 meter.  
+- **k = 3** – kleine buurt, ±37 hexagonen. Bestrijkt ongeveer een paar straten.  
+- **k = 5** – grotere buurt, ±91 hexagonen. Omvat een deelwijk of bedrijventerrein van enkele hectares.  
+"""
+            )
+
+    return ui
+
+
+def render_report_section(
+    ui: Dict[str, Any], container: Any | None = None
+) -> Dict[str, Any]:
+    """Render the report upload/download section."""
+    target = container if container is not None else st.sidebar
+    with target:
+        # ---------------- Rapport samenstellen ----------------
         with st.expander("Rapport samenstellen", expanded=False):
             def _cleanup_report_file():
                 report_path = st.session_state.get("report_pdf_path")
@@ -1492,7 +1531,6 @@ def build_sidebar(
                 key="report_dpi",
                 on_change=_clear_report_cache,
             )
-            # caption removed on request
             ui["report_dpi"] = int(selected_dpi)
             st.write(
                 "1. Zet de kaart in de gewenste weergave.\n"
@@ -1565,7 +1603,6 @@ def build_sidebar(
                     st.session_state["report_image_uploaded"] = True
                     st.session_state["show_map"] = False
                     st.session_state["_map_changed"] = True
-                    st.session_state["map_raw_cache"] = None
                     st.session_state["sites_ready"] = False
                     st.session_state.pop("main_map_deck_chart", None)
                     st.session_state.pop("main_map_deck_chart_selected_data", None)
@@ -1597,39 +1634,4 @@ def build_sidebar(
             report_slot = st.container()
             ui["report_slot"] = report_slot
 
-        # ---------------- Uitleg-blokken ----------------
-        st.header("Uitleg")
-        with st.expander("Uitleg H3", expanded=False):
-            st.write(
-                "H3 is een hexagonaal raster dat gebieden verdeelt in zeshoeken van verschillende resoluties. "
-                "Elke hexagoon krijgt een unieke ID en bevat gegevens over de warmtebehoefte."
-            )
-
-        with st.expander("Warmtevraag-hotspots", expanded=False):
-            st.markdown(
-                """\
-**Doel van de analyse**  
-De analyse laat zien waar een **collectieve warmtevoorziening** (zoals een warmtenet) kansrijk kan zijn. Dit gebeurt door te kijken hoeveel gasverbruik en gebouwen er binnen de directe omgeving van een mogelijke locatie liggen en of deze plek past binnen de capaciteit van een potentiële bron.
-
-**Werkwijze in hoofdlijnen**  
-1. Rondom een centrale plek wordt gekeken naar omliggende buurten in de vorm van zeshoekige vakjes (hexagonen). De straal bepaalt hoe groot de omgeving is die wordt meegenomen.  
-2. Per locatie wordt berekend hoeveel gasverbruik en hoeveel gebouwen in die omgeving aanwezig zijn. Daarbij geldt een maximum: een voorziening kan maar een bepaalde hoeveelheid warmte leveren en een maximum aantal gebouwen aansluiten.  
-3. Alle locaties worden gerangschikt op de hoeveelheid warmte die daadwerkelijk kan worden aangesloten.  
-4. Vervolgens worden de beste locaties geselecteerd, met een minimale onderlinge afstand zodat voorzieningen niet te dicht bij elkaar liggen.  
-
-**Begrippen**  
-- **k-ring:** de directe omgeving van een plek, gemeten in stappen van hexagonen. Hoe hoger de waarde, hoe verder de omgeving reikt.  
-- **Minimale afstand tussen voorzieningen:** de onderlinge ruimte die wordt aangehouden, zodat meerdere voorzieningen niet op (bijna) dezelfde plek terechtkomen.  
-
-**Verschil tussen deze twee**  
-- De *k-ring* bepaalt hoe ver je kijkt om het totale gasverbruik en aantal gebouwen rond één plek te bepalen (de invloedsstraal van een plek).  
-- De *minimale afstand* zorgt ervoor dat twee geselecteerde voorzieningen niet te dicht naast elkaar komen te liggen (de spreiding tussen verschillende plekken).  
-
-**K-ring in de praktijk (k = 1 t/m 5)**  
-- **k = 1** – directe buren, circa 7 hexagonen. Denk aan een cluster van enkele panden binnen ~200 meter.  
-- **k = 3** – kleine buurt, ±37 hexagonen. Bestrijkt ongeveer een paar straten.  
-- **k = 5** – grotere buurt, ±91 hexagonen. Omvat een deelwijk of bedrijventerrein van enkele hectares.  
-"""
-            )
-
-    return df_filtered, ui
+    return ui

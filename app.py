@@ -3,6 +3,8 @@ from __future__ import annotations
 
 # ========== Imports ==========
 import gc
+import os
+import time
 from pathlib import Path
 import sys
 
@@ -49,22 +51,27 @@ from core.h3sites import (
 )
 from core.h3agg import H3_RES13_COL
 from core.map_data import (
-    build_map_dataframe,
     build_site_records,
     extract_selected_hex_from_payload,
 )
 from core.io import (
     load_geojson,
-    load_data,
     resolve_wegennet_path,
     resolve_wegennet_paths,
 )
+from core.dal import dal_query
 from core.woonplaats import load_woonplaats_areas, build_woonplaats_summary, normalize_woonplaats
 from core.report import build_report_pdf
-from ui.sidebar import build_sidebar
+from ui.sidebar import build_sidebar, render_report_section
 from ui.kpis_and_tables import render_kpis, render_tabs
 
 # Flow: load data -> build sidebar -> compute aggregates -> render layers.
+
+# ---------- Performance caps ----------
+MAX_H3_CELLS = 50_000
+MAX_OBJECT_ROWS = 50_000
+MAX_TOTAL_ROWS_ALL_LAYERS = 80_000
+MIN_H3_RES = 8
 
 
 # (optioneel) live RAM-meting in sidebar
@@ -110,6 +117,16 @@ st.markdown(
     }
     .block-container {
       padding-bottom: 1.5rem;
+    }
+    div[data-testid="stForm"] {
+      border: 0 !important;
+      padding: 0 !important;
+    }
+    div[data-testid="stForm"] > div {
+      padding: 0 !important;
+    }
+    div[data-testid="stForm"] .stFormSubmitButton {
+      margin-top: 0 !important;
     }
     </style>
     """,
@@ -250,79 +267,70 @@ if gjson_buurt_potentie:
 warmtenet_meta = build_warmtenet_meta(gjson_warmtenet)
 wegennet_meta = build_wegennet_meta(None)
 
-df_raw = load_data()
-_log_ram("after_load_data")
-
 # ========== Sidebar / UI ==========
-sidebar_out = build_sidebar(df_raw, potential_meta, warmtenet_meta, wegennet_meta)
-map_button_clicked_sidebar = False
-if isinstance(sidebar_out, tuple):
-    if len(sidebar_out) == 3:
-        df_filtered_input, ui, map_button_clicked_sidebar = sidebar_out
-    else:
-        df_filtered_input, ui = sidebar_out
-else:
-    df_filtered_input, ui = sidebar_out
-
-report_slot = ui.get("report_slot") if isinstance(ui, dict) else None
-zoom_level_notice = int(ui.get("zoom_level", 0)) if isinstance(ui, dict) else 0
-heat_unit_notice = str(ui.get("heat_unit", "")).strip() if isinstance(ui, dict) else ""
-if zoom_level_notice in (9, 10):
-    if heat_unit_notice == "kWh/m²":
-        notice_text = (
-            "Gebruiksoppervlakte (kWh/m²), "
-            "<strong>minder geschikt</strong> voor zoomniveau 9 en 10"
-        )
-    else:
-        notice_text = (
-            "Grondoppervlakte (MWh/ha), "
-            "<strong>geschikt</strong> voor zoomniveau 9 en 10"
-        )
-else:
-    if heat_unit_notice == "MWh/ha":
-        notice_text = (
-            "Grondoppervlakte (MWh/ha), "
-            "<strong>minder geschikt</strong> voor zoomniveau 11 en 12"
-        )
-    else:
-        notice_text = (
-            "Gebruiksoppervlakte (kWh/m²), "
-            "<strong>geschikt</strong> voor zoomniveau 11 en 12 (pandniveau)"
-        )
-warmtevraag_notice_slot.markdown(
-    f"""
-    <div style="
-        background-color: #fff4e5;
-        border-left: 4px solid #ff9800;
-        padding: 8px 12px;
-        font-size: 0.85rem;
-        line-height: 1.4;
-        border-radius: 4px;
-        color: #3f2a00;
-        margin-top: 6px;
-    ">
-        <strong>Getoonde warmtevraag:</strong><br>
-        {notice_text}
-    </div>
-    """,
-    unsafe_allow_html=True,
+report_path = st.session_state.get("report_pdf_path")
+report_pdf_exists = bool(report_path and Path(report_path).exists())
+disable_map_submit = bool(
+    st.session_state.get("report_image_uploaded") or report_pdf_exists
 )
 
-def _handle_make_map_click() -> None:
-    st.session_state["show_map"] = True
-    st.session_state["_map_changed"] = False
+form = st.form("filters_form")
+with form:
+    ui = build_sidebar(None, potential_meta, warmtenet_meta, wegennet_meta)
 
+    zoom_level_notice = int(ui.get("zoom_level", 0))
+    heat_unit_notice = str(ui.get("heat_unit", "")).strip()
+    if zoom_level_notice in (9, 10):
+        if heat_unit_notice == "kWh/m²":
+            notice_text = (
+                "Gebruiksoppervlakte (kWh/m²), "
+                "<strong>minder geschikt</strong> voor zoomniveau 9 en 10"
+            )
+        else:
+            notice_text = (
+                "Grondoppervlakte (MWh/ha), "
+                "<strong>geschikt</strong> voor zoomniveau 9 en 10"
+            )
+    else:
+        if heat_unit_notice == "MWh/ha":
+            notice_text = (
+                "Grondoppervlakte (MWh/ha), "
+                "<strong>minder geschikt</strong> voor zoomniveau 11 en 12"
+            )
+        else:
+            notice_text = (
+                "Gebruiksoppervlakte (kWh/m²), "
+                "<strong>geschikt</strong> voor zoomniveau 11 en 12 (pandniveau)"
+            )
+    warmtevraag_notice_slot.markdown(
+        f"""
+        <div style="
+            background-color: #fff4e5;
+            border-left: 4px solid #ff9800;
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            border-radius: 4px;
+            color: #3f2a00;
+            margin-top: 6px;
+        ">
+            <strong>Getoonde warmtevraag:</strong><br>
+            {notice_text}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
-if st.session_state.get("report_image_uploaded") or (
-    st.session_state.get("report_pdf_path")
-    and Path(st.session_state.get("report_pdf_path")).exists()
-):
-    map_button_clicked_main = False
-else:
-    map_button_clicked_main = st.button("Maak kaart", on_click=_handle_make_map_click)
-map_button_clicked = bool(map_button_clicked_sidebar or map_button_clicked_main)
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    if disable_map_submit:
+        map_button_clicked = False
+    else:
+        map_button_clicked = st.form_submit_button("Maak kaart")
+
 _log_ram("after_sidebar")
+report_container = ui.get("report_slot_container")
+ui = render_report_section(ui, report_container)
+report_slot = ui.get("report_slot")
 
 # ========== State init ==========
 st.session_state.setdefault("show_map", False)
@@ -342,7 +350,6 @@ st.session_state.setdefault("report_map_image_sig", None)
 st.session_state.setdefault("report_in_progress", False)
 st.session_state.setdefault("map_initialized", False)
 st.session_state.setdefault("report_pdf_has_image", False)
-st.session_state.setdefault("map_raw_cache", None)
 
 st.session_state.setdefault("first_hint_shown", False)
 
@@ -430,6 +437,39 @@ def _request_report() -> None:
 
 def _handle_report_download() -> None:
     _clear_report_state(clear_map_image=True)
+
+
+def _read_file_bytes(path: str | Path) -> bytes:
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _build_dal_filters(ui: dict, *, resolution: int | None = None) -> dict:
+    """Prepare primitive filters for DAL queries."""
+    return {
+        "gemeente": _as_sorted_list(ui.get("gemeente_selectie", [])),
+        "woonplaats": _as_sorted_list(ui.get("woonplaats_selectie", [])),
+        "energieklasse": _as_sorted_list(ui.get("energieklasse_selectie", [])),
+        "bouwjaar_range": ui.get("bouwjaar_range", (0, 3000)),
+        "pand_selectie": ui.get("pand_selectie", "Klein-, middel- en grootverbruik"),
+        "resolution": int(resolution or ui.get("resolution") or 0),
+    }
+
+
+def _perf_debug_enabled() -> bool:
+    val = os.getenv("WARMTE_DEBUG", "").strip().lower()
+    return val in {"1", "true", "yes", "y"}
+
+
+def _get_fd_count() -> int | None:
+    try:
+        import psutil
+    except Exception:
+        return None
+    try:
+        return int(psutil.Process(os.getpid()).num_fds())
+    except Exception:
+        return None
 
 
 # ===== Filters-snapshot =====
@@ -665,7 +705,6 @@ if filters_changed:
     st.session_state.prev_filters = current_filters
     st.session_state.prev_report_filters = current_report_filters
     _clear_report_state(clear_map_image=True)
-    st.session_state["map_raw_cache"] = None
     woonplaats_only_change = bool(changed_keys) and changed_keys.issubset(
         {"woonplaats"}
     )
@@ -692,7 +731,6 @@ else:
     if report_filters_changed:
         st.session_state.prev_report_filters = current_report_filters
         _clear_report_state(clear_map_image=True)
-        st.session_state["map_raw_cache"] = None
 
 if map_button_clicked:
     st.session_state.show_map = True
@@ -705,7 +743,6 @@ if should_compute:
     if st.session_state.get("report_requested"):
         st.session_state.show_map = False
         st.session_state["_map_changed"] = True
-        st.session_state["map_raw_cache"] = None
         st.session_state["sites_ready"] = False
         st.session_state["map_initialized"] = False
         st.session_state.pop("main_map_deck_chart", None)
@@ -722,24 +759,84 @@ if should_compute:
     )
     value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
 
-    map_raw_cache = st.session_state.get("map_raw_cache") or {}
-    use_cached_raw = bool(st.session_state.get("report_image_uploaded")) and (
-        map_raw_cache.get("filters") == current_filters
-    )
-    if use_cached_raw:
-        df_filtered = map_raw_cache["df_filtered"].copy()
-        df_extra_info = map_raw_cache["df_extra_info"].copy()
-        df_view_source = map_raw_cache["df_view_source"].copy()
-    else:
-        df_filtered, df_extra_info, df_view_source = build_map_dataframe(
-            df_filtered_input, res, log_fn=_log_ram
+    perf_info = {"query_ms": None}
+    filters_for_dal = _build_dal_filters(ui, resolution=res)
+    query_start = time.perf_counter()
+    df_map_agg = dal_query(filters_for_dal, "map_hex")
+    perf_info["query_ms"] = int((time.perf_counter() - query_start) * 1000)
+
+    effective_res = res
+    coarsened = False
+    warn_detail = None
+    while len(df_map_agg) > MAX_H3_CELLS and effective_res > MIN_H3_RES:
+        effective_res -= 1
+        filters_for_dal["resolution"] = effective_res
+        df_map_agg = dal_query(filters_for_dal, "map_hex")
+        coarsened = True
+    if len(df_map_agg) > MAX_H3_CELLS:
+        df_map_agg = df_map_agg.sample(n=MAX_H3_CELLS, random_state=42)
+        warn_detail = (
+            "Detail is teruggebracht (sampling) om performance te waarborgen."
         )
-        st.session_state["map_raw_cache"] = {
-            "filters": current_filters.copy(),
-            "df_filtered": df_filtered.copy(),
-            "df_extra_info": df_extra_info.copy(),
-            "df_view_source": df_view_source.copy(),
-        }
+    elif coarsened:
+        warn_detail = (
+            "Detailniveau is verlaagd om performance te waarborgen."
+        )
+    if warn_detail:
+        st.warning(warn_detail)
+
+    df_filtered = df_map_agg.copy()
+    if df_filtered.empty:
+        df_filtered = pd.DataFrame(
+            columns=[
+                "h3_index",
+                "sum_mwh",
+                "sum_area",
+                "sum_kwh",
+                "cnt",
+                "mean_bouwjaar",
+                "sum_vbos",
+                "woonplaats",
+            ]
+        )
+    df_filtered["kWh_per_m2"] = (
+        pd.to_numeric(df_filtered.get("sum_kwh"), errors="coerce").fillna(0.0)
+        / pd.to_numeric(df_filtered.get("cnt"), errors="coerce").replace(0, pd.NA)
+    ).fillna(0.0).round(0)
+    df_filtered["aantal_huizen"] = (
+        pd.to_numeric(df_filtered.get("cnt"), errors="coerce")
+        .fillna(0)
+        .astype("int32")
+    )
+    df_filtered["gemiddeld_jaarverbruik_mWh"] = (
+        pd.to_numeric(df_filtered.get("sum_mwh"), errors="coerce")
+        .fillna(0.0)
+        .round(0)
+    )
+    df_filtered["sum_mwh_raw"] = pd.to_numeric(
+        df_filtered.get("sum_mwh"), errors="coerce"
+    ).fillna(0.0)
+    df_filtered["totale_oppervlakte"] = (
+        pd.to_numeric(df_filtered.get("sum_area"), errors="coerce")
+        .fillna(0.0)
+        .round(0)
+    )
+    df_filtered["bouwjaar"] = (
+        pd.to_numeric(df_filtered.get("mean_bouwjaar"), errors="coerce")
+        .fillna(0.0)
+        .round(0)
+    )
+    df_filtered["aantal_VBOs"] = (
+        pd.to_numeric(df_filtered.get("sum_vbos"), errors="coerce")
+        .fillna(0)
+        .round(0)
+        .astype("int32")
+    )
+    df_filtered.drop(
+        columns=["sum_mwh", "sum_area", "sum_kwh", "cnt", "mean_bouwjaar", "sum_vbos"],
+        inplace=True,
+        errors="ignore",
+    )
 
     # afronden
     df_filtered["kWh_per_m2"] = df_filtered["kWh_per_m2"].round(0)
@@ -822,8 +919,6 @@ if should_compute:
         lower=0, upper=threshold_display
     )
 
-    # merge extra tooltip info
-    df_filtered = df_filtered.merge(df_extra_info, on="h3_index", how="left")
     df_filtered = df_filtered[
         [
             "h3_index",
@@ -887,7 +982,7 @@ if should_compute:
             st.session_state.sites_ready = False
 
         sites_mode = current_sites_mode or "auto"
-        k_val = int(st.session_state.kring_radius)
+        k_val = int(st.session_state.get("kring_radius", 3))
 
         if sites_mode == "auto":
             compute_requested = ui.get("compute_sites", False)
@@ -1028,143 +1123,42 @@ if should_compute:
     pandtype_mwh_by_woonplaats = None
     woonplaats_summary = None
     woonplaats_area_df = load_woonplaats_areas()
-    if isinstance(df_view_source, pd.DataFrame) and not df_view_source.empty:
-        woonplaats_summary = build_woonplaats_summary(
-            df_view_source, woonplaats_area_df
+
+    summary_df = dal_query(filters_for_dal, "woonplaats_summary")
+    if not summary_df.empty and "woonplaats" in summary_df.columns:
+        summary_df["woonplaats"] = summary_df["woonplaats"].astype(str).str.strip()
+        summary_df = summary_df[summary_df["woonplaats"].ne("")]
+        if not summary_df.empty and woonplaats_area_df is not None and not woonplaats_area_df.empty:
+            area_df = woonplaats_area_df.copy()
+            area_df["woonplaats_norm"] = area_df["woonplaats"].map(normalize_woonplaats)
+            summary_df["woonplaats_norm"] = summary_df["woonplaats"].map(normalize_woonplaats)
+            summary_df = summary_df.merge(
+                area_df[["woonplaats_norm", "area_ha"]],
+                on="woonplaats_norm",
+                how="left",
+            )
+            summary_df.drop(columns=["woonplaats_norm"], inplace=True)
+            area_vals = summary_df["area_ha"].replace({0: pd.NA})
+            summary_df["MWh_per_ha"] = summary_df["MWh"].div(area_vals)
+        woonplaats_summary = summary_df
+
+    counts_hex_df = dal_query(filters_for_dal, "pandtype_counts_by_hex")
+    if not counts_hex_df.empty:
+        counts_hex_df["h3_index"] = counts_hex_df["h3_index"].astype(str)
+        pandtype_counts_by_hex = counts_hex_df.set_index("h3_index")
+
+    counts_wp_df = dal_query(filters_for_dal, "pandtype_counts_by_woonplaats")
+    if not counts_wp_df.empty:
+        counts_wp_df["woonplaats"] = counts_wp_df["woonplaats"].astype(str).str.strip()
+        pandtype_counts_by_woonplaats = counts_wp_df
+
+    pandtype_mwh_df = dal_query(filters_for_dal, "pandtype_mwh_by_woonplaats")
+    if not pandtype_mwh_df.empty:
+        pandtype_mwh_by_woonplaats = pandtype_mwh_df
+        area_vals = pandtype_mwh_by_woonplaats["area_ha"].replace({0: pd.NA})
+        pandtype_mwh_by_woonplaats["MWh_per_ha"] = (
+            pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
         )
-    if isinstance(df_view_source, pd.DataFrame) and "Dataset" in df_view_source:
-        dataset_lc = (
-            df_view_source["Dataset"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.lower()
-        )
-        woningen_mask = dataset_lc.eq("kleinverbruik")
-        bedrijven_types = {
-            "middel- en grootverbruik alliander en tno",
-            "middel- en grootverbruik tno",
-        }
-        bedrijven_mask = dataset_lc.isin(bedrijven_types)
-        counts_hex = pd.DataFrame(
-            {
-                "h3_index": df_view_source["h3_index"],
-                "woningen": woningen_mask.astype("int32"),
-                "bedrijven": bedrijven_mask.astype("int32"),
-            }
-        ).dropna(subset=["h3_index"])
-        if not counts_hex.empty:
-            pandtype_counts_by_hex = (
-                counts_hex.groupby("h3_index", sort=False, observed=True).sum()
-            )
-        if "woonplaats" in df_view_source.columns:
-            counts_df = pd.DataFrame(
-                {
-                    "woonplaats": df_view_source["woonplaats"],
-                    "woningen": woningen_mask.astype("int32"),
-                    "bedrijven": bedrijven_mask.astype("int32"),
-                }
-            ).dropna(subset=["woonplaats"])
-            if not counts_df.empty:
-                counts_df["woonplaats"] = (
-                    counts_df["woonplaats"].astype(str).str.strip()
-                )
-                pandtype_counts_by_woonplaats = (
-                    counts_df.groupby(
-                        "woonplaats", as_index=False, sort=False, observed=True
-                    ).sum()
-                )
-        if (
-            H3_RES13_COL in df_view_source.columns
-            and "gemiddeld_jaarverbruik_mWh" in df_view_source.columns
-            and "woonplaats" in df_view_source.columns
-        ):
-            df_base = df_view_source.loc[
-                :,
-                [
-                    H3_RES13_COL,
-                    "woonplaats",
-                    "gemiddeld_jaarverbruik_mWh",
-                ],
-            ].copy()
-            df_base["gemiddeld_jaarverbruik_mWh"] = pd.to_numeric(
-                df_base["gemiddeld_jaarverbruik_mWh"], errors="coerce"
-            ).fillna(0.0)
-            df_base["woningen"] = woningen_mask.astype("int32")
-            df_base["bedrijven"] = bedrijven_mask.astype("int32")
-
-            def _first_non_empty(series: pd.Series) -> str:
-                for val in series:
-                    if pd.notna(val):
-                        text = str(val).strip()
-                        if text:
-                            return text
-                return ""
-
-            wp_by_hex = (
-                df_base.groupby(H3_RES13_COL, sort=False, observed=True)[
-                    "woonplaats"
-                ]
-                .agg(_first_non_empty)
-                .to_dict()
-            )
-            hex_agg = (
-                df_base.groupby(H3_RES13_COL, sort=False, observed=True)
-                .agg(
-                    MWh=("gemiddeld_jaarverbruik_mWh", "sum"),
-                    woningen=("woningen", "sum"),
-                    bedrijven=("bedrijven", "sum"),
-                )
-                .reset_index()
-            )
-            hex_agg["woonplaats"] = hex_agg[H3_RES13_COL].map(wp_by_hex)
-            hex_agg = hex_agg[hex_agg["woonplaats"].astype(str).str.strip().ne("")]
-            if not hex_agg.empty:
-                hex_agg["type_code"] = ""
-                hex_agg.loc[hex_agg["woningen"] > 0, "type_code"] = "A"
-                hex_agg.loc[hex_agg["bedrijven"] > 0, "type_code"] = "B"
-                hex_agg.loc[
-                    (hex_agg["woningen"] > 0) & (hex_agg["bedrijven"] > 0),
-                    "type_code",
-                ] = "C"
-                hex_agg = hex_agg[hex_agg["type_code"] != ""]
-                hex_agg["panden_count"] = 0
-                hex_agg.loc[hex_agg["type_code"] == "A", "panden_count"] = hex_agg[
-                    "woningen"
-                ]
-                hex_agg.loc[hex_agg["type_code"] == "B", "panden_count"] = hex_agg[
-                    "bedrijven"
-                ]
-                hex_agg.loc[hex_agg["type_code"] == "C", "panden_count"] = (
-                    hex_agg["woningen"] + hex_agg["bedrijven"]
-                )
-                area_km2_lookup = {
-                    idx: float(h3.cell_area(idx, unit="km^2"))
-                    for idx in hex_agg[H3_RES13_COL].dropna().unique()
-                }
-                hex_agg["area_ha"] = (
-                    hex_agg[H3_RES13_COL].map(area_km2_lookup).astype("float32")
-                    * 100.0
-                )
-                pandtype_mwh_by_woonplaats = (
-                    hex_agg.groupby(
-                        ["woonplaats", "type_code"],
-                        as_index=False,
-                        sort=False,
-                        observed=True,
-                    )
-                    .agg(
-                        MWh=("MWh", "sum"),
-                        aantal_panden=("panden_count", "sum"),
-                        area_ha=("area_ha", "sum"),
-                    )
-                    .reset_index(drop=True)
-                )
-                area_vals = pandtype_mwh_by_woonplaats["area_ha"].replace({0: pd.NA})
-                pandtype_mwh_by_woonplaats["MWh_per_ha"] = (
-                    pandtype_mwh_by_woonplaats["MWh"].div(area_vals)
-                )
-
     if sites_records:
         _enrich_site_records_with_pandtypes(sites_records, pandtype_counts_by_hex)
         st.session_state.sites = sites_records
@@ -1386,7 +1380,7 @@ if should_compute:
         )
         if show_pandtype_labels and not df_hex_view.empty:
             label_size = 10
-            h3_resolution = int(ui.get("resolution") or ui.get("zoom_level", 0))
+            h3_resolution = int(effective_res or ui.get("zoom_level", 0))
             if h3_resolution >= 12:
                 label_size = 6
             elif h3_resolution >= 11:
@@ -1398,6 +1392,11 @@ if should_compute:
                 (label_df["woningen"] > 0) | (label_df["bedrijven"] > 0)
             ]
             if not label_df.empty:
+                if len(label_df) > MAX_OBJECT_ROWS:
+                    label_df = label_df.sample(n=MAX_OBJECT_ROWS, random_state=42)
+                    st.warning(
+                        "Aantal pandtype-labels is beperkt om performance te waarborgen."
+                    )
                 label_df["label"] = "B"
                 label_df.loc[label_df["woningen"] > 0, "label"] = "A"
                 label_df.loc[
@@ -1424,6 +1423,18 @@ if should_compute:
         indic_value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
         indic_mask = df_filtered[indic_value_col] > threshold_display
         df_indicative = df_hex_view.loc[indic_mask, :]
+        total_rows = len(df_hex_view) + len(df_indicative)
+        if total_rows > MAX_TOTAL_ROWS_ALL_LAYERS:
+            allowed = max(0, MAX_TOTAL_ROWS_ALL_LAYERS - len(df_hex_view))
+            if allowed < len(df_indicative):
+                df_indicative = df_indicative.sample(n=allowed, random_state=42)
+                st.warning(
+                    "Detail van de aandachtslaag is beperkt om performance te waarborgen."
+                )
+        debug_row_counts = {
+            "hex": len(df_hex_view),
+            "indicatief": len(df_indicative),
+        }
         _log_ram("before_pydeck_layers")
         warmte_opacity = float(
             ui.get("warmte_hex_opacity", st.session_state.get("warmte_hex_opacity", 0.6))
@@ -1480,7 +1491,7 @@ if should_compute:
         )
     
         # ========== ViewState ==========
-        def _view_for_selection(df_full, woonplaatsen_geselecteerd):
+        def _view_for_selection(view_bounds: dict | None, woonplaatsen_geselecteerd):
             """Bepaal kaartcentrum en zoom op basis van de huidige selectie."""
             manual_hex_current = st.session_state.get("manual_site_h3")
             if current_sites_mode == "manual" and manual_hex_current:
@@ -1491,17 +1502,16 @@ if should_compute:
             min_zoom, max_zoom = 8, 18.0
             if not woonplaatsen_geselecteerd:
                 return friesland_center[0], friesland_center[1], friesland_zoom
-            df_sel = df_full[df_full["woonplaats"].isin(woonplaatsen_geselecteerd)]
-            if df_sel.empty:
+            if not view_bounds:
                 return friesland_center[0], friesland_center[1], friesland_zoom
-            lat_center = float(df_sel["latitude"].mean())
-            lon_center = float(df_sel["longitude"].mean())
+            lat_center = float(view_bounds.get("lat_mean") or friesland_center[0])
+            lon_center = float(view_bounds.get("lon_mean") or friesland_center[1])
             if len(woonplaatsen_geselecteerd) == 1:
                 return lat_center, lon_center, 13.0
-            lat_min = float(df_sel["latitude"].min())
-            lat_max = float(df_sel["latitude"].max())
-            lon_min = float(df_sel["longitude"].min())
-            lon_max = float(df_sel["longitude"].max())
+            lat_min = float(view_bounds.get("lat_min") or lat_center)
+            lat_max = float(view_bounds.get("lat_max") or lat_center)
+            lon_min = float(view_bounds.get("lon_min") or lon_center)
+            lon_max = float(view_bounds.get("lon_max") or lon_center)
             lat_span = max(0.0001, lat_max - lat_min)
             lon_span = max(0.0001, lon_max - lon_min)
             span = max(lat_span, lon_span)
@@ -1524,7 +1534,18 @@ if should_compute:
             zoom = max(min_zoom, min(max_zoom, zoom))
             return lat_center, lon_center, zoom
     
-        lat, lon, zoom = _view_for_selection(df_view_source, ui["woonplaats_selectie"])
+        view_df = dal_query(filters_for_dal, "view_bounds")
+        view_bounds = None
+        if not view_df.empty:
+            view_bounds = {
+                "lat_mean": view_df.at[0, "lat_mean"],
+                "lon_mean": view_df.at[0, "lon_mean"],
+                "lat_min": view_df.at[0, "lat_min"],
+                "lat_max": view_df.at[0, "lat_max"],
+                "lon_min": view_df.at[0, "lon_min"],
+                "lon_max": view_df.at[0, "lon_max"],
+            }
+        lat, lon, zoom = _view_for_selection(view_bounds, ui["woonplaats_selectie"])
         st.session_state.view_state = pdk.ViewState(
             longitude=lon,
             latitude=lat,
@@ -1634,6 +1655,30 @@ if should_compute:
                     show_pandtype_labels=bool(ui.get("show_pandtype_labels", False)),
                 )
             st.session_state["_map_changed"] = False
+            if _perf_debug_enabled():
+                mem_mb = None
+                try:
+                    import psutil
+                except Exception:
+                    mem_mb = None
+                else:
+                    try:
+                        mem_mb = psutil.Process(os.getpid()).memory_info().rss / 1e6
+                    except Exception:
+                        mem_mb = None
+                fd_count = _get_fd_count()
+                with st.sidebar.expander("Debug", expanded=False):
+                    if mem_mb is not None:
+                        st.write(f"RAM (RSS): {mem_mb:.1f} MB")
+                    if fd_count is not None:
+                        st.write(f"Open file descriptors: {fd_count}")
+                    if perf_info.get("query_ms") is not None:
+                        st.write(f"Query time: {perf_info['query_ms']} ms")
+                    st.write(
+                        f"Rows per layer: hex={debug_row_counts.get('hex', 0)}, "
+                        f"indicatief={debug_row_counts.get('indicatief', 0)}, "
+                        f"sites={len(sites_records or [])}"
+                    )
     if st.session_state.get("report_requested"):
         report_generated = False
         status_slot = report_slot if report_slot is not None else report_status_slot
@@ -1668,7 +1713,6 @@ if should_compute:
                 if not map_image_path:
                     st.session_state.show_map = False
                     st.session_state["_map_changed"] = True
-                    st.session_state["map_raw_cache"] = None
                     st.session_state["sites_ready"] = False
                     st.session_state.pop("main_map_deck_chart", None)
                     st.session_state.pop("main_map_deck_chart_selected_data", None)
@@ -1738,7 +1782,7 @@ if should_compute:
             if report_path and Path(report_path).exists():
                 st.download_button(
                     "Download PDF-rapport",
-                    data=lambda p=report_path: open(p, "rb"),
+                    data=_read_file_bytes(report_path),
                     file_name=report_filename,
                     mime="application/pdf",
                     on_click=_handle_report_download,
@@ -1788,7 +1832,7 @@ else:
             if report_path and Path(report_path).exists():
                 st.download_button(
                     "Download PDF-rapport",
-                    data=lambda p=report_path: open(p, "rb"),
+                    data=_read_file_bytes(report_path),
                     file_name=report_filename,
                     mime="application/pdf",
                     on_click=_handle_report_download,

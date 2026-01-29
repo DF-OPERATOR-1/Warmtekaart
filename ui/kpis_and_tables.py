@@ -848,7 +848,7 @@ def render_tabs(
     """
     Tabs:
       - Top woonplaatsen (MWh)  [altijd]
-      - Kandidaat hotspots [alleen als show_sites_layer]
+      - Warmte-hotspots [alleen als show_sites_layer]
     RAM-zuinig: minimale kolomselecties, vectorized formatting.
     """
     if isinstance(sites_costed, list):
@@ -868,7 +868,7 @@ def render_tabs(
     if show_comparison_tab:
         tab_labels.append("Warmtenet inzicht")
     if show_sites_layer:
-        tab_labels.append("Kandidaat-hotspots")
+        tab_labels.append("Warmte-hotspots")
     tabs = st.tabs(tab_labels)
     tab_idx = 0
     tab1 = tabs[tab_idx]
@@ -1313,7 +1313,7 @@ def render_tabs(
                 st.warning(warning_text)
         tab_idx += 1
 
-    # --- TAB 3: Kandidaat hotspots ---
+    # --- TAB 3: Warmte-hotspots ---
     if show_sites_layer:
         with tabs[tab_idx]:
             if sites_costed_df is not None and not sites_costed_df.empty:
