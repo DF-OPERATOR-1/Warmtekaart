@@ -18,9 +18,9 @@ import gzip
 import shutil
 
 input_file = (
-    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson"
+    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/wegennet_friesland.geojson"
 )
-output_file = "warmtenet_full.geojson.gz"
+output_file = "wegennet_frl.geojson.gz"
 
 with open(input_file, "rb") as f_in:
     with gzip.open(output_file, "wb") as f_out:
@@ -49,8 +49,8 @@ print("Done.")
 import geopandas as gpd
 
 # Paden
-gpkg_path = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/wegennet/wegennet_friesland.gpkg"
-out_path = "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/wegennet_friesland.geojson"
+gpkg_path = "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/wegennet_friesland.gpkg"
+out_path = "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/wegennet_friesland.geojson"
 
 # Lees de enige laag in de geopackage
 gdf = gpd.read_file(gpkg_path)
