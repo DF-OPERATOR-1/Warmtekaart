@@ -400,6 +400,24 @@ def build_sidebar(
             st.session_state["map_style"] = map_style_value
             ui["basemap_style"] = basemap_style
             st.session_state["basemap_style"] = basemap_style
+        
+            clip_labels = {
+                    "Geen": "none",
+                    "Alleen Fryslân": "clip",
+                    "Fryslân verbergen": "inverse",
+            }
+            clip_values = {v: k for k, v in clip_labels.items()}
+            clip_default = st.session_state.get("friesland_clip_mode", "none")
+            clip_label_default = clip_values.get(clip_default, "Geen")
+            clip_label = st.selectbox(
+                    "Fryslân clip",
+                    options=list(clip_labels.keys()),
+                    index=list(clip_labels.keys()).index(clip_label_default),
+                    help="Masker de kaart op Fryslân of verberg Fryslân om de rest te tonen.",
+            )
+            clip_mode = clip_labels.get(clip_label, "none")
+            ui["friesland_clip_mode"] = clip_mode
+            st.session_state["friesland_clip_mode"] = clip_mode
 
         # ---------------- Participatie ----------------
         with st.expander("Participatie", expanded=False):

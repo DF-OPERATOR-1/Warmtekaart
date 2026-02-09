@@ -90,6 +90,14 @@ WOONPLAATS_AREA_PATH = _env_path(
     "WARMTE_LYR_WOONPLAATSEN_AREA",
     LAYERS_DIR / "woonplaats_area.csv",
 )
+WOONPLAATS_GPKG_PATH = _env_path_opt(
+    "WARMTE_LYR_WOONPLAATSEN_GPKG",
+    LAYERS_DIR / "BAG_WOONPLAATSEN_EX_WATER.gpkg",
+)
+WOONPLAATS_MASK_GPKG_PATH = _env_path_opt(
+    "WARMTE_LYR_WOONPLAATSEN_MASK_GPKG",
+    LAYERS_DIR / "BAG_Woonplaatsen_FRL-ruw.gpkg",
+)
 
 
 # ================================

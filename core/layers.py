@@ -12,7 +12,12 @@ from pyproj import Transformer
 
 from shapely.geometry import box as shapely_box, mapping as shapely_mapping
 
-from .config import LAYER_CFG, BASEMAP_CFG, WOONPLAATS_GPKG_PATH
+from .config import (
+    LAYER_CFG,
+    BASEMAP_CFG,
+    WOONPLAATS_GPKG_PATH,
+    WOONPLAATS_MASK_GPKG_PATH,
+)
 from .utils import (
     get_layer_colors,
     get_dynamic_line_width,
@@ -38,14 +43,19 @@ _RD_TO_WGS84 = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
 @st.cache_data(show_spinner=False, max_entries=1, ttl=86400)
 def _load_friesland_union() -> object | None:
     """Laad een geometrie-union van alle woonplaatsen (Friesland)."""
-    if not WOONPLAATS_GPKG_PATH or not WOONPLAATS_GPKG_PATH.exists():
+    mask_path = (
+        WOONPLAATS_MASK_GPKG_PATH
+        if WOONPLAATS_MASK_GPKG_PATH and WOONPLAATS_MASK_GPKG_PATH.exists()
+        else WOONPLAATS_GPKG_PATH
+    )
+    if not mask_path or not mask_path.exists():
         return None
     try:
         import geopandas as gpd
     except Exception:
         return None
     try:
-        gdf = gpd.read_file(WOONPLAATS_GPKG_PATH)
+        gdf = gpd.read_file(mask_path)
     except Exception:
         return None
     if gdf.empty:
