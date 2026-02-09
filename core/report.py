@@ -650,11 +650,13 @@ def _build_warmtenet_report_tables(
     kosten_conn_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_aansluitingen_euro"), errors="coerce"
     ).fillna(0.0)
-    kosten_tot_warmtebron = kosten_net_warmtebron + kosten_conn_warmtebron
     kosten_bron_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_bronnen_euro"), errors="coerce"
     )
     kosten_bron_warmtebron = kosten_bron_warmtebron.fillna(0.0)
+    kosten_tot_warmtebron = (
+        kosten_net_warmtebron + kosten_conn_warmtebron + kosten_bron_warmtebron
+    )
 
     def _format_series(series, decimals: int, *, prefix: str = "", suffix: str = ""):
         s = pd.to_numeric(series, errors="coerce")
@@ -718,11 +720,11 @@ def _build_warmtenet_report_tables(
         cost_txt = _format_series(pd.Series([cost_val]), 0, prefix="€ ").iloc[0]
         parts = []
         if length_txt:
-            parts.append(f"{length_label}: {length_txt}")
+            parts.append(f"{length_label}:\n{length_txt}")
         elif length_placeholder is not None:
-            parts.append(f"{length_label}: {length_placeholder}")
+            parts.append(f"{length_label}:\n{length_placeholder}")
         if cost_txt:
-            parts.append(f"{cost_label}: {cost_txt}")
+            parts.append(f"{cost_label}:\n{cost_txt}")
         return "\n".join(parts)
 
     def _fmt_euro_only(value) -> str:
@@ -737,6 +739,7 @@ def _build_warmtenet_report_tables(
         {
             "Woonplaats": merged["woonplaats_display"],
             "Type": "Bron",
+            "Kosten bron": [_fmt_euro_only(v) for v in kosten_bron_warmtebron],
             "Kosten netwerk": [
                 _fmt_len_cost(
                     _cost_to_length(v_cost),
@@ -764,6 +767,7 @@ def _build_warmtenet_report_tables(
         {
             "Woonplaats": merged["woonplaats_display"],
             "Type": "Vraag",
+            "Kosten bron": ["-" for _ in range(len(out_leidingen_bron))],
             "Kosten netwerk": [
                 _fmt_len_cost(
                     v_len,
@@ -2543,7 +2547,7 @@ def build_report_pdf(
                 elif title == "Warmtenet_vraag":
                     col_widths = [0.18, 0.14, 0.19, 0.19, 0.15, 0.15]
                 elif title == "Warmtenet_kosten":
-                    col_widths = [0.12, 0.34, 0.30, 0.24]
+                    col_widths = [0.14, 0.18, 0.24, 0.24, 0.20]
                     wrap_max_chars = 90
 
                 group_by_woonplaats = title == "Warmtenet_kosten"

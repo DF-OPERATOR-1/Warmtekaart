@@ -1096,7 +1096,6 @@ def _warmtenet_extra_rows(props: dict) -> str:
         _add_row("Aangesloten objecten", props.get("aangesloten_objecten"), decimals=0)
         _add_currency("Kosten bron", props.get("kosten_bron_euro"))
         _add_currency("Kosten aansluitingen", props.get("kosten_aansluitingen_euro"))
-        _add_currency("Totale kosten bron", props.get("bron_totale_kosten_euro"))
     elif layer_type == "object":
         _add_row("Warmtevraag (MWh/jaar)", props.get("vraag_mwh_per_jaar"), decimals=1)
         _add_currency("Kosten aansluiting", props.get("kosten_aansluiting_euro"))

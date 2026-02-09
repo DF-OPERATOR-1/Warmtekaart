@@ -670,7 +670,6 @@ def _render_warmtenet_comparison(
     kosten_conn_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_aansluitingen_euro"), errors="coerce"
     ).fillna(0.0)
-    kosten_tot_warmtebron = kosten_net_warmtebron + kosten_conn_warmtebron
     kosten_bron_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_bronnen_euro"), errors="coerce"
     )
@@ -678,6 +677,9 @@ def _render_warmtenet_comparison(
         merged.get("warmtenet_kosten_bron_totaal_euro"), errors="coerce"
     )
     kosten_bron_warmtebron = kosten_bron_warmtebron.fillna(0.0)
+    kosten_tot_warmtebron = (
+        kosten_net_warmtebron + kosten_conn_warmtebron + kosten_bron_warmtebron
+    )
     kosten_bron_totaal_warmtebron = kosten_bron_totaal_warmtebron.fillna(
         kosten_bron_warmtebron + kosten_conn_warmtebron
     )
@@ -769,6 +771,7 @@ def _render_warmtenet_comparison(
                 "Type": "Bron",
                 "Netwerk (m)": warmtenet_lengte_m,
                 "Aansluiting (m)": warmtenet_conn_m,
+                "Kosten\nbron": kosten_bron_warmtebron,
                 "Kosten\nnetwerk": kosten_net_warmtebron,
                 "Kosten\naansluiting": kosten_conn_warmtebron,
                 "Totale kosten": kosten_tot_warmtebron,
@@ -780,6 +783,7 @@ def _render_warmtenet_comparison(
                 "Type": "Vraag",
                 "Netwerk (m)": wegennet_lengte_m,
                 "Aansluiting (m)": wegennet_conn_m,
+                "Kosten\nbron": np.nan,
                 "Kosten\nnetwerk": kosten_net_wegennet,
                 "Kosten\naansluiting": kosten_conn_wegennet,
                 "Totale kosten": kosten_tot_wegennet,
@@ -804,14 +808,20 @@ def _render_warmtenet_comparison(
                 lambda v: "-" if pd.isna(v) else format_dutch_number(v, 0)
             )
         for col in [
+            "Kosten\nbron",
             "Kosten\nnetwerk",
             "Kosten\naansluiting",
             "Totale kosten",
         ]:
             s = pd.to_numeric(out_fmt[col], errors="coerce")
-            out_fmt[col] = s.map(
-                lambda v: "" if pd.isna(v) else f"€ {format_dutch_number(v, 0)}"
-            )
+            if col == "Kosten\nbron":
+                out_fmt[col] = s.map(
+                    lambda v: "-" if pd.isna(v) else f"€ {format_dutch_number(v, 0)}"
+                )
+            else:
+                out_fmt[col] = s.map(
+                    lambda v: "" if pd.isna(v) else f"€ {format_dutch_number(v, 0)}"
+                )
         _render_wrapped_table(out_fmt, height=420)
 
 

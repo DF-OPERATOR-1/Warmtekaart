@@ -739,7 +739,14 @@ else:
     st.session_state["_map_changed"] = False
     if report_filters_changed:
         st.session_state.prev_report_filters = current_report_filters
-        _clear_report_state(clear_map_image=True)
+        report_path = st.session_state.get("report_pdf_path")
+        report_exists = bool(report_path and Path(report_path).exists())
+        if (
+            not st.session_state.get("report_requested")
+            and not st.session_state.get("report_in_progress")
+            and not report_exists
+        ):
+            _clear_report_state(clear_map_image=True)
 
 if map_button_clicked:
     st.session_state.show_map = True
@@ -1799,11 +1806,15 @@ if should_compute:
                             f"{err_detail}). PDF is zonder afbeelding gemaakt."
                         )
                         report_generated = True
-                    except Exception:
+                    except Exception as exc2:
                         st.session_state["report_pdf_path"] = None
                         st.session_state["report_filename"] = None
+                        err_detail = type(exc2).__name__
+                        if str(exc2).strip():
+                            err_detail = f"{err_detail}: {exc2}"
                         st.session_state["report_map_image_error"] = (
-                            "PDF maken is mislukt. Probeer het opnieuw."
+                            "PDF maken is mislukt. Probeer het opnieuw.\n"
+                            f"Foutdetail: {err_detail}"
                         )
                         report_generated = True
                 st.session_state["report_in_progress"] = False
