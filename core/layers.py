@@ -1,3 +1,5 @@
+"""Opbouw van PyDeck-lagen en GeoJSON-conversie/tooltipdata."""
+
 # core/layers.py
 from __future__ import annotations
 
@@ -115,18 +117,23 @@ def build_friesland_mask_layer(
 # ------------------------------------------------------------
 # Helpers: data normaliseren naar records (list[dict])
 # ------------------------------------------------------------
-def _to_records(data: Union[Records, "pd.DataFrame"]) -> Records:
-    """Accepteer DataFrame of list[dict] en geef list[dict] terug."""
+def _to_records(data: Union[Records, "pd.DataFrame"]):
+    """Accepteer DataFrame of list[dict] en geef records zonder zware kopieën."""
     if data is None:
         return []
     try:
         import pandas as pd  # lazy
 
         if isinstance(data, pd.DataFrame):
-            return data.to_dict("records")
+            if data.empty:
+                return []
+            # Vermijd to_dict("records") om RAM-pieken te beperken.
+            return list(data.itertuples(index=False, name="Record"))
     except Exception:
         pass
     if isinstance(data, list):
+        if all(isinstance(x, dict) for x in data):
+            return data
         return [dict(x) for x in data]
     return []
 
@@ -279,7 +286,9 @@ def _buurt_extra_rows(props: dict) -> str:
 def build_water_potential_meta(gjson: dict) -> dict:
     cfg = LAYER_CFG["water_potentie"]
     n_colors = cfg.get("n_colors", 5)
-    colors = get_color_palette(cfg.get("palette", "BuGn"), n_colors, cfg.get("alpha", 210))
+    colors = get_color_palette(
+        cfg.get("palette", "BuGn"), n_colors, cfg.get("alpha", 210)
+    )
     values = extract_numeric_values(gjson, cfg["prop_name"])
     breaks = compute_quantile_breaks(values, n_colors)
     if breaks and len(breaks) > n_colors - 1:
@@ -362,7 +371,9 @@ def build_warmtenet_meta(gjson: dict | None) -> dict:
             continue
         woonplaats_raw = str(props.get("woonplaats") or "").strip()
         bron_label = str(props.get("bron_id") or "").strip()
-        type_bron = str(props.get("type_bron") or props.get("gegevensbron") or "").strip()
+        type_bron = str(
+            props.get("type_bron") or props.get("gegevensbron") or ""
+        ).strip()
         if not bron_label and "__" in key:
             bron_label = key.split("__", 1)[1]
         pretty_label = bron_label or key
@@ -587,6 +598,14 @@ def create_site_layers(
     if not records:
         return site_layers
 
+    def _get(rec, key, default=None):
+        if isinstance(rec, dict):
+            return rec.get(key, default)
+        try:
+            return getattr(rec, key)
+        except Exception:
+            return default
+
     base_fill = [225, 86, 48, 140]
     base_line = [0, 0, 0, 220]
 
@@ -594,10 +613,10 @@ def create_site_layers(
     hexagon_records = []
 
     for r in records:
-        site_rank = int(r.get("site_rank") or 0) or 0
-        coverage_summary = r.get("coverage_summary") or {}
-        polygons = r.get("coverage_polygons") or []
-        hexes = r.get("coverage_hexes") or []
+        site_rank = int(_get(r, "site_rank") or 0) or 0
+        coverage_summary = _get(r, "coverage_summary") or {}
+        polygons = _get(r, "coverage_polygons") or []
+        hexes = _get(r, "coverage_hexes") or []
 
         for poly in polygons:
             polygon_records.append(
@@ -609,21 +628,21 @@ def create_site_layers(
                     "site_rank_label": coverage_summary.get(
                         "site_rank_label", site_rank
                     ),
-                    "woonplaats": r.get("woonplaats", ""),
-                    "cluster_buildings": r.get("cluster_buildings"),
-                    "cap_buildings": r.get("cap_buildings"),
-                    "connected_buildings": r.get("connected_buildings"),
-                    "cluster_MWh": r.get("cluster_MWh"),
-                    "cap_MWh": r.get("cap_MWh"),
-                    "connected_MWh": r.get("connected_MWh"),
-                    "utilization_pct": r.get("utilization_pct"),
-                    "cluster_buildings_fmt": r.get("cluster_buildings_fmt"),
-                    "cap_buildings_fmt": r.get("cap_buildings_fmt"),
-                    "connected_buildings_fmt": r.get("connected_buildings_fmt"),
-                    "cluster_MWh_fmt": r.get("cluster_MWh_fmt"),
-                    "cap_MWh_fmt": r.get("cap_MWh_fmt"),
-                    "connected_MWh_fmt": r.get("connected_MWh_fmt"),
-                    "utilization_pct_fmt": r.get("utilization_pct_fmt"),
+                    "woonplaats": _get(r, "woonplaats", ""),
+                    "cluster_buildings": _get(r, "cluster_buildings"),
+                    "cap_buildings": _get(r, "cap_buildings"),
+                    "connected_buildings": _get(r, "connected_buildings"),
+                    "cluster_MWh": _get(r, "cluster_MWh"),
+                    "cap_MWh": _get(r, "cap_MWh"),
+                    "connected_MWh": _get(r, "connected_MWh"),
+                    "utilization_pct": _get(r, "utilization_pct"),
+                    "cluster_buildings_fmt": _get(r, "cluster_buildings_fmt"),
+                    "cap_buildings_fmt": _get(r, "cap_buildings_fmt"),
+                    "connected_buildings_fmt": _get(r, "connected_buildings_fmt"),
+                    "cluster_MWh_fmt": _get(r, "cluster_MWh_fmt"),
+                    "cap_MWh_fmt": _get(r, "cap_MWh_fmt"),
+                    "connected_MWh_fmt": _get(r, "connected_MWh_fmt"),
+                    "utilization_pct_fmt": _get(r, "utilization_pct_fmt"),
                     # aggregaties voor tooltip
                     "aantal_huizen": coverage_summary.get("aantal_huizen"),
                     "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
@@ -718,28 +737,28 @@ def create_site_layers(
 
     scatter_records = []
     for r in use_records:
-        lon, lat = r.get("lon"), r.get("lat")
+        lon, lat = _get(r, "lon"), _get(r, "lat")
         if lon is None or lat is None:
             continue
-        site_rank = int(r.get("site_rank") or 0) or 0
+        site_rank = int(_get(r, "site_rank") or 0) or 0
         color = base_fill
 
-        coverage_summary = r.get("coverage_summary") or {}
+        coverage_summary = _get(r, "coverage_summary") or {}
 
         # ruwe waarden
-        cluster_buildings = r.get("cluster_buildings")
-        cap_buildings = r.get("cap_buildings")
-        connected_buildings = r.get("connected_buildings")
-        cluster_MWh = r.get("cluster_MWh")
-        cap_MWh = r.get("cap_MWh")
-        connected_MWh = r.get("connected_MWh")
-        utilization_pct = r.get("utilization_pct")
+        cluster_buildings = _get(r, "cluster_buildings")
+        cap_buildings = _get(r, "cap_buildings")
+        connected_buildings = _get(r, "connected_buildings")
+        cluster_MWh = _get(r, "cluster_MWh")
+        cap_MWh = _get(r, "cap_MWh")
+        connected_MWh = _get(r, "connected_MWh")
+        utilization_pct = _get(r, "utilization_pct")
 
         scatter_records.append(
             {
                 "lon": lon,
                 "lat": lat,
-                "woonplaats": r.get("woonplaats", ""),
+                "woonplaats": _get(r, "woonplaats", ""),
                 "site_rank": site_rank,
                 # raw
                 "cluster_buildings": cluster_buildings,
@@ -758,22 +777,24 @@ def create_site_layers(
                 "area_m2_total": coverage_summary.get("area_m2_total"),
                 "area_m2_total_fmt": coverage_summary.get("area_m2_total_fmt"),
                 # formatted for tooltip (maak ze indien niet aanwezig)
-                "cluster_buildings_fmt": r.get("cluster_buildings_fmt")
+                "cluster_buildings_fmt": _get(r, "cluster_buildings_fmt")
                 or _fmt0(cluster_buildings),
-                "cap_buildings_fmt": r.get("cap_buildings_fmt") or _fmt0(cap_buildings),
-                "connected_buildings_fmt": r.get("connected_buildings_fmt")
+                "cap_buildings_fmt": _get(r, "cap_buildings_fmt")
+                or _fmt0(cap_buildings),
+                "connected_buildings_fmt": _get(r, "connected_buildings_fmt")
                 or _fmt0(connected_buildings),
-                "cluster_MWh_fmt": r.get("cluster_MWh_fmt") or _fmt0(cluster_MWh),
-                "cap_MWh_fmt": r.get("cap_MWh_fmt") or _fmt0(cap_MWh),
-                "connected_MWh_fmt": r.get("connected_MWh_fmt") or _fmt0(connected_MWh),
-                "utilization_pct_fmt": r.get("utilization_pct_fmt")
+                "cluster_MWh_fmt": _get(r, "cluster_MWh_fmt") or _fmt0(cluster_MWh),
+                "cap_MWh_fmt": _get(r, "cap_MWh_fmt") or _fmt0(cap_MWh),
+                "connected_MWh_fmt": _get(r, "connected_MWh_fmt")
+                or _fmt0(connected_MWh),
+                "utilization_pct_fmt": _get(r, "utilization_pct_fmt")
                 or (str(int(utilization_pct)) if utilization_pct is not None else ""),
                 # display-velden voor tooltip-secties
                 "hex_section_display": coverage_summary.get(
-                    "hex_section_display", r.get("hex_section_display", "none")
+                    "hex_section_display", _get(r, "hex_section_display", "none")
                 ),
-                "site_section_display": r.get("site_section_display", "block"),
-                "geo_section_display": r.get("geo_section_display", "none"),
+                "site_section_display": _get(r, "site_section_display", "block"),
+                "geo_section_display": _get(r, "geo_section_display", "none"),
                 # aggregated hex data
                 "aantal_huizen": coverage_summary.get("aantal_huizen"),
                 "aantal_VBOs": coverage_summary.get("aantal_VBOs"),
@@ -801,8 +822,6 @@ def create_site_layers(
                 "fill_color": color,
             }
         )
-
-    # Dot markers verwijderd; de groene hexagonen bevatten de tooltipinformatie.
 
     return site_layers
 
@@ -1158,7 +1177,6 @@ def _warmtenet_extra_rows(props: dict) -> str:
         _add_row("Aangesloten objecten", props.get("aangesloten_objecten"), decimals=0)
         _add_currency("Kosten bron", props.get("kosten_bron_euro"))
         _add_currency("Kosten aansluitingen", props.get("kosten_aansluitingen_euro"))
-        _add_currency("Totale kosten bron", props.get("bron_totale_kosten_euro"))
     elif layer_type == "object":
         _add_row("Warmtevraag (MWh/jaar)", props.get("vraag_mwh_per_jaar"), decimals=1)
         _add_currency("Kosten aansluiting", props.get("kosten_aansluiting_euro"))

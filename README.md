@@ -10,12 +10,13 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 ## Belangrijkste bestanden
 - app.py: hoofdflow van de app (load -> UI -> berekenen -> render).
 - ui/sidebar.py: alle UI controls, filters en toggles.
+- core/dal.py: DuckDB data access (filters/aggregaties tegen data.parquet).
 - core/io.py: data/geojson loaders + caching helpers.
 - core/layers.py: opbouw van PyDeck lagen + GeoJSON conversie + laag-meta helpers.
 - core/utils.py: helpers voor kleur, tooltip, formatting.
 - core/h3sites.py: logica voor warmtenet-analyse (warmte hotspots).
 - core/h3agg.py: H3 aggregaties en groepering van data.
-- core/map_data.py: kaartdata voorbereiden + site records opbouwen.
+- core/map_data.py: site records en H3-hulpfuncties.
 - core/report.py: PDF-rapportage (samenvatting, tabellen, kaartpagina).
 - core/woonplaats.py: woonplaats-aggregaties en oppervlakte uit geopackage.
 - data/scripts/geojson.py: hulpscript voor GeoJSON bewerkingen/conversie.
@@ -33,8 +34,10 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 
 **Data paden + defaults**
 - core/config.py: bij *_PATH
-- core/config.py: WOONPLAATS_GPKG_PATH / WARMTE_LYR_WOONPLAATSEN
 - core/config.py: WOONPLAATS_AREA_PATH / WARMTE_LYR_WOONPLAATSEN_AREA
+
+**DuckDB / DAL (filters & aggregaties)**
+- core/dal.py: dal_query(...) en get_con() (view op data.parquet)
 
 **GeoJSON precisie en payload**
 - core/io.py: (load_geojson, coord_precision)
@@ -43,7 +46,8 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - core/h3sites.py
 
 **H3 aggregaties/rollups**
-- core/h3agg.py: (engine) + core/map_data.py (kaart-voorbereiding)
+- core/h3agg.py: (engine)
+- core/map_data.py: site records en H3 helpers
 
 **UI filters/toggles/teksten**
 - ui/sidebar.py
@@ -58,6 +62,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 ## Structuur per map
 **core/**
 - `config.py`: centrale configuratie (paden, kleuren, layer-metadata).
+- `dal.py`: DuckDB data-access layer (SQL filters/aggregaties).
 - `io.py`: inlezen/cachen van GeoJSON en tabellen.
 - `layers.py`: PyDeck lagen + tooltip opbouw + GeoJSON conversie.
 - `utils.py`: algemene helpers (kleur, formatting, tooltip snippets).
@@ -83,8 +88,8 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 ## Dataflow (hoog niveau)
 1) Data en lagen laden.
 2) Sidebar bepaalt filters/toggles en schrijft naar `st.session_state`.
-3) Woonplaats-samenvatting wordt gebouwd op basis van puntdata.
-4) H3 aggregaties en (optioneel) warmtenet-analyse worden gebouwd.
+3) DAL (DuckDB) voert filters/aggregaties uit tegen `data.parquet`.
+4) (Optioneel) warmtenet/hotspot-analyse wordt gebouwd.
 5) PyDeck lagen + tooltip samenstellen en renderen.
 
 ## Woonplaats logica
@@ -92,7 +97,7 @@ De code is gericht op performance en kaartinteractie via PyDeck.
 - Oppervlakte per woonplaats komt uit `data/layers/woonplaats_area.csv` (voorbewerkt).
 - Hexagonen zijn alleen visualisatie; H3-oppervlakte bepaalt MWh/ha op de kaart.
 - Voorbewerken om RAM te sparen: `python data/scripts/woonplaats_area_export.py`
-- Bronbestand voor export: `data/layers/BAG_Woonplaatsen_FRL-ruw.gpkg`
+- Bronbestand voor export: `data/layers/BAG_WOONPLAATSEN_EX_WATER.gpkg`
 
 ## Kaartlagen
 - Basislaag: warmtevraag (H3).

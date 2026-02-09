@@ -1,3 +1,5 @@
+"""IO-helpers voor GeoJSON/Parquet, caching en pad-resolutie."""
+
 # core/io.py
 import json
 import gzip
@@ -16,7 +18,6 @@ pd.set_option("mode.copy_on_write", True)
 from .config import (
     LAYER_CFG,
     DATA_CSV_PATH,
-    DATA_CSV_URL,
     ENERGIEARMOEDE_PATH,
     KOOPWONINGEN_PATH,
     WOONCORPORATIE_PATH,
@@ -43,7 +44,7 @@ def _resolve_layer_path(path: Path) -> Path | None:
     return None
 
 
-@st.cache_data(show_spinner=False, max_entries=8, ttl=86400)
+@st.cache_data(show_spinner=False, max_entries=4, ttl=21600)
 def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, ttl=3600):
     """
     Laadt een GeoJSON- of Parquet-bestand als dict.
@@ -173,57 +174,6 @@ def load_geojson(path: str | Path, keep_props=None, coord_precision: int = 3, tt
         feats.append({"type": "Feature", "properties": props, "geometry": geom})
 
     return {"type": "FeatureCollection", "features": feats}
-
-
-# ============================================================
-# Google download cache-map voor externe downloads
-# ============================================================
-CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _is_url(x: str | Path) -> bool:
-    s = str(x)
-    return s.startswith("http://") or s.startswith("https://")
-
-
-def _is_gdrive(url: str) -> bool:
-    u = url.lower()
-    return ("drive.google.com" in u) or ("docs.google.com" in u)
-
-
-def _extract_gdrive_file_id(url: str) -> str | None:
-    m = re.search(r"[?&]id=([a-zA-Z0-9_-]{10,})", url)
-    if m:
-        return m.group(1)
-    m = re.search(r"/file/d/([a-zA-Z0-9_-]{10,})", url)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _gdrive_to_cache(url: str, filename_hint: str = "data_kWh.csv") -> Path:
-    """Download 1x naar cache met gdown en retourneer lokaal pad."""
-    try:
-        import gdown  # lazy import
-    except Exception as e:
-        raise RuntimeError(
-            "gdown is vereist voor Google Drive-URL's (voeg gdown>=5.1 toe aan requirements)."
-        ) from e
-
-    file_id = _extract_gdrive_file_id(url)
-    if not file_id:
-        raise ValueError(f"Kon geen Google Drive file-id vinden in URL: {url}")
-
-    suffix = Path(filename_hint).suffix or ".csv"
-    cache_path = CACHE_DIR / f"gdrive_{file_id}{suffix}"
-
-    if not cache_path.exists():
-        gdown.download(
-            f"https://drive.google.com/uc?id={file_id}", str(cache_path), quiet=False
-        )
-
-    return cache_path
 
 
 def _slugify_name(value: str) -> str:
@@ -433,14 +383,11 @@ def load_data(src: str | Path | None = None, ttl=3600) -> pd.DataFrame:
         elif DATA_CSV_PATH.exists():
             src = DATA_CSV_PATH
         else:
-            src = DATA_CSV_URL
+            raise FileNotFoundError(
+                "Geen lokaal data-bestand gevonden voor DATA_CSV_PATH."
+            )
 
-    # ---------- Download als URL ----------
-    if isinstance(src, (str, Path)) and _is_url(str(src)):
-        s = str(src)
-        read_target = _gdrive_to_cache(s) if _is_gdrive(s) else s
-    else:
-        read_target = Path(src)
+    read_target = Path(src)
 
     # ---------- Kolommen & dtypes ----------
     usecols = [

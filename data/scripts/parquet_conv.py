@@ -1,10 +1,11 @@
-#%%
+# %%
 import pandas as pd
+
 # Read the CSV file
 df = pd.read_csv(
     r"/Users/anguyen/Documents/GitHub/Warmtekaart/data/safe file/data.csv",
     sep=",",
-    low_memory=False
+    low_memory=False,
 )
 # Als MWh/jaar bestaat: hernoem naar gemiddeld_jaarverbruik_mWh
 if "MWh/jaar" in df.columns and "gemiddeld_jaarverbruik_mWh" not in df.columns:

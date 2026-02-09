@@ -1,3 +1,5 @@
+"""H3-mapdata en site-records helpers."""
+
 # core/map_data.py
 from __future__ import annotations
 
@@ -79,9 +81,7 @@ def build_res13_cached(df_src: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False, max_entries=6, ttl=1800)
-def ensure_parent_series_for_cached(
-    df_with_res13: pd.DataFrame, res: int
-) -> pd.Series:
+def ensure_parent_series_for_cached(df_with_res13: pd.DataFrame, res: int) -> pd.Series:
     """Geef h3-index op gewenste resolutie, bereken ouders indien nodig."""
     if res == BASE_H3_RES:
         return df_with_res13[H3_RES13_COL]
@@ -286,14 +286,18 @@ def build_site_records(
 
         if not df_site_hex.empty:
 
-            def _series_sum(df_local: pd.DataFrame, column_name: str, want_int: bool = False):
+            def _series_sum(
+                df_local: pd.DataFrame, column_name: str, want_int: bool = False
+            ):
                 if column_name not in df_local.columns:
                     return 0
                 vals = pd.to_numeric(df_local[column_name], errors="coerce").fillna(0)
                 total = float(vals.sum())
                 return _safe_int(total, 0) if want_int else _safe_float(total, 0.0)
 
-            def _series_mean(df_local: pd.DataFrame, column_name: str, want_int: bool = False):
+            def _series_mean(
+                df_local: pd.DataFrame, column_name: str, want_int: bool = False
+            ):
                 if column_name not in df_local.columns:
                     return 0 if want_int else 0.0
                 vals = pd.to_numeric(df_local[column_name], errors="coerce").dropna()
@@ -357,8 +361,7 @@ def build_site_records(
                     or record.get("woonplaats", ""),
                     "aantal_huizen": _safe_int(getattr(cov, "aantal_huizen", 0), 0)
                     or 0,
-                    "aantal_VBOs": _safe_int(getattr(cov, "aantal_VBOs", 0), 0)
-                    or 0,
+                    "aantal_VBOs": _safe_int(getattr(cov, "aantal_VBOs", 0), 0) or 0,
                     "MWh_per_ha_r": _safe_float(getattr(cov, "MWh_per_ha_r", 0.0), 0.0)
                     or 0.0,
                     "gemiddeld_jaarverbruik_mWh_r": _safe_float(
@@ -367,8 +370,7 @@ def build_site_records(
                     or 0.0,
                     "area_ha_r": _safe_float(getattr(cov, "area_ha_r", 0.0), 0.0)
                     or 0.0,
-                    "area_m2": _safe_float(getattr(cov, "area_m2", 0.0), 0.0)
-                    or 0.0,
+                    "area_m2": _safe_float(getattr(cov, "area_m2", 0.0), 0.0) or 0.0,
                     "kWh_per_m2": _safe_float(getattr(cov, "kWh_per_m2", 0.0), 0.0)
                     or 0.0,
                     "totale_oppervlakte": _safe_int(
@@ -378,9 +380,7 @@ def build_site_records(
                     "bouwjaar": _safe_int(getattr(cov, "bouwjaar", 0), 0) or 0,
                     "aantal_huizen_fmt": _fmt0s(getattr(cov, "aantal_huizen", 0)),
                     "aantal_VBOs_fmt": _fmt0s(getattr(cov, "aantal_VBOs", 0)),
-                    "MWh_per_ha_r_fmt": _fmt2s(
-                        getattr(cov, "MWh_per_ha_r", 0.0)
-                    ),
+                    "MWh_per_ha_r_fmt": _fmt2s(getattr(cov, "MWh_per_ha_r", 0.0)),
                     "gemiddeld_jaarverbruik_mWh_r_fmt": _fmt0s(
                         getattr(cov, "gemiddeld_jaarverbruik_mWh_r", 0)
                     ),
@@ -391,13 +391,9 @@ def build_site_records(
                         getattr(cov, "totale_oppervlakte", 0)
                     ),
                     "bouwjaar_fmt": _fmt_year(getattr(cov, "bouwjaar", 0)),
-                    "MWh_per_pand": _safe_float(
-                        getattr(cov, "MWh_per_pand", 0.0), 0.0
-                    )
+                    "MWh_per_pand": _safe_float(getattr(cov, "MWh_per_pand", 0.0), 0.0)
                     or 0.0,
-                    "MWh_per_pand_fmt": _fmt2s(
-                        getattr(cov, "MWh_per_pand", 0.0)
-                    ),
+                    "MWh_per_pand_fmt": _fmt2s(getattr(cov, "MWh_per_pand", 0.0)),
                     "hex_section_display": "block",
                     "site_section_display": "block",
                     "geo_section_display": "none",
@@ -420,7 +416,9 @@ def build_site_records(
                 }
                 coverage_hexes.append(cov_dict)
 
-        density_value = coverage_summary.get("MWh_per_ha", 0.0) if coverage_summary else 0.0
+        density_value = (
+            coverage_summary.get("MWh_per_ha", 0.0) if coverage_summary else 0.0
+        )
         record["MWh_per_ha"] = float(density_value or 0.0)
         record["MWh_per_ha_fmt"] = _fmt2s(record["MWh_per_ha"])
 

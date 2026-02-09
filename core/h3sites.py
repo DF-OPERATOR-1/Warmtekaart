@@ -1,3 +1,5 @@
+"""Warmte-hotspot selectie en k-ring aggregaties."""
+
 # core/h3sites.py
 from __future__ import annotations
 

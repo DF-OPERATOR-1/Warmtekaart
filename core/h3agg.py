@@ -1,3 +1,5 @@
+"""H3-aggregaties en rollups voor kaartvisualisatie."""
+
 # core/h3agg.py
 from __future__ import annotations
 
@@ -71,9 +73,8 @@ def build_res13_agg(df_points_res13: pd.DataFrame) -> pd.DataFrame:
     )
     cnt = pd.Series(1, index=tmp.index, dtype="int32")
     res_base = (
-        tmp.assign(kwh_sum=kwh_sum, cnt=cnt).groupby(
-            H3_RES13_COL, sort=False, observed=True
-        )
+        tmp.assign(kwh_sum=kwh_sum, cnt=cnt)
+        .groupby(H3_RES13_COL, sort=False, observed=True)
         .agg(
             sum_mwh=("gemiddeld_jaarverbruik_mWh", "sum"),
             sum_area=("totale_oppervlakte", "sum"),

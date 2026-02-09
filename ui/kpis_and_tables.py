@@ -1,3 +1,5 @@
+"""KPI-kaarten en tabellen onder de kaart."""
+
 # ui/kpis_and_tables.py
 from __future__ import annotations
 
@@ -294,9 +296,7 @@ def _normalize_woonplaats(value: str | None) -> str:
 
 def _normalize_woonplaats_list(values: list[str] | None) -> set[str]:
     return {
-        _normalize_woonplaats(v)
-        for v in (values or [])
-        if _normalize_woonplaats(v)
+        _normalize_woonplaats(v) for v in (values or []) if _normalize_woonplaats(v)
     }
 
 
@@ -361,9 +361,7 @@ def _build_warmtenet_summary(gjson: dict | None) -> pd.DataFrame:
                 props.get("ingezet_mwh_per_jaar")
             )
         elif layer == "object":
-            entry["warmtenet_object_mwh"] += _to_float(
-                props.get("vraag_mwh_per_jaar")
-            )
+            entry["warmtenet_object_mwh"] += _to_float(props.get("vraag_mwh_per_jaar"))
             afstand_val = props.get("afstand_pad_m")
             if afstand_val not in (None, ""):
                 try:
@@ -421,6 +419,7 @@ def _build_warmtenet_summary(gjson: dict | None) -> pd.DataFrame:
 
     rows = []
     for wp_norm, entry in acc.items():
+
         def _sum_vals(values: set[float]) -> float | None:
             if not values:
                 return None
@@ -571,9 +570,7 @@ def _render_warmtenet_comparison(
     warm_sel = _normalize_woonplaats_list(warmtenet_wp)
     weg_sel = _normalize_woonplaats_list(wegennet_wp)
     if warm_sel:
-        warmtenet_df = warmtenet_df[
-            warmtenet_df["woonplaats_norm"].isin(warm_sel)
-        ]
+        warmtenet_df = warmtenet_df[warmtenet_df["woonplaats_norm"].isin(warm_sel)]
     if weg_sel:
         wegennet_df = wegennet_df[wegennet_df["woonplaats_norm"].isin(weg_sel)]
 
@@ -598,9 +595,7 @@ def _render_warmtenet_comparison(
         merged["basis_panden"] = np.nan
     else:
         merged = merged.merge(
-            basis_df.loc[
-                :, ["woonplaats_norm", "basis_vraag_mwh", "basis_panden"]
-            ],
+            basis_df.loc[:, ["woonplaats_norm", "basis_vraag_mwh", "basis_panden"]],
             on="woonplaats_norm",
             how="left",
         )
@@ -624,19 +619,16 @@ def _render_warmtenet_comparison(
     warmtebron_mwh_loss = warmtebron_mwh * (1.0 - heat_loss_pct)
 
     basis_mwh = pd.to_numeric(merged.get("basis_vraag_mwh"), errors="coerce")
-    wegennet_mwh = (
-        pd.to_numeric(merged.get("wegennet_vraag_mwh"), errors="coerce")
-        .fillna(0.0)
-    )
+    wegennet_mwh = pd.to_numeric(
+        merged.get("wegennet_vraag_mwh"), errors="coerce"
+    ).fillna(0.0)
     basis_panden = pd.to_numeric(merged.get("basis_panden"), errors="coerce")
-    wegennet_panden = (
-        pd.to_numeric(merged.get("wegennet_aansluitingen"), errors="coerce")
-        .fillna(0.0)
-    )
-    warmtebron_panden = (
-        pd.to_numeric(merged.get("warmtenet_aangesloten_panden"), errors="coerce")
-        .fillna(0.0)
-    )
+    wegennet_panden = pd.to_numeric(
+        merged.get("wegennet_aansluitingen"), errors="coerce"
+    ).fillna(0.0)
+    warmtebron_panden = pd.to_numeric(
+        merged.get("warmtenet_aangesloten_panden"), errors="coerce"
+    ).fillna(0.0)
 
     onbenut_mwh = wegennet_mwh - warmtebron_mwh_loss
     dekking_pct = np.where(
@@ -666,9 +658,7 @@ def _render_warmtenet_comparison(
         wegennet_conn_m > 0, wegennet_conn_m, wegennet_conn_fallback
     )
     wegennet_conn_m = pd.Series(wegennet_conn_m, index=merged.index)
-    warmtenet_conn_m = (
-        warmtebron_panden.fillna(0.0) * conn_length_per_pand_m
-    )
+    warmtenet_conn_m = warmtebron_panden.fillna(0.0) * conn_length_per_pand_m
 
     kosten_net_wegennet = wegennet_lengte_m * cost_per_meter_net
     kosten_conn_wegennet = wegennet_conn_m * cost_per_meter_conn
@@ -680,7 +670,6 @@ def _render_warmtenet_comparison(
     kosten_conn_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_aansluitingen_euro"), errors="coerce"
     ).fillna(0.0)
-    kosten_tot_warmtebron = kosten_net_warmtebron + kosten_conn_warmtebron
     kosten_bron_warmtebron = pd.to_numeric(
         merged.get("warmtenet_kosten_bronnen_euro"), errors="coerce"
     )
@@ -688,6 +677,9 @@ def _render_warmtenet_comparison(
         merged.get("warmtenet_kosten_bron_totaal_euro"), errors="coerce"
     )
     kosten_bron_warmtebron = kosten_bron_warmtebron.fillna(0.0)
+    kosten_tot_warmtebron = (
+        kosten_net_warmtebron + kosten_conn_warmtebron + kosten_bron_warmtebron
+    )
     kosten_bron_totaal_warmtebron = kosten_bron_totaal_warmtebron.fillna(
         kosten_bron_warmtebron + kosten_conn_warmtebron
     )
@@ -712,7 +704,7 @@ def _render_warmtenet_comparison(
     )
 
     with tab_warmte:
-        st.caption("Warmtenet uit warmtebron is gecorrigeerd met 15% warmteverlies.")
+        st.caption("Warmtenet uit warmtebron is gecorrigeerd voor 15% warmteverlies.")
         out_warmte = pd.DataFrame(
             {
                 "Woonplaats": merged["woonplaats_display"],
@@ -770,37 +762,66 @@ def _render_warmtenet_comparison(
 
     with tab_leidingen:
         st.caption(
-            "Kostenberekening: €1000/m leidingnet en €346/m aansluitingen. "
-            "Warmtebron: gemiddeld 15 m per aansluiting."
+            "Kostenberekening: €1.000/m leidingnet en €346/m aansluitingen. "
+            "Warmtebron: vast bedrag van €5.190 per aansluiting."
         )
-        out_leidingen = pd.DataFrame(
+        out_leidingen_bron = pd.DataFrame(
             {
                 "Woonplaats": merged["woonplaats_display"],
                 "Type": "Bron",
                 "Netwerk (m)": warmtenet_lengte_m,
                 "Aansluiting (m)": warmtenet_conn_m,
+                "Kosten\nbron": kosten_bron_warmtebron,
                 "Kosten\nnetwerk": kosten_net_warmtebron,
                 "Kosten\naansluiting": kosten_conn_warmtebron,
                 "Totale kosten": kosten_tot_warmtebron,
             }
-        ).sort_values(["Woonplaats", "Type"])
+        )
+        out_leidingen_vraag = pd.DataFrame(
+            {
+                "Woonplaats": merged["woonplaats_display"],
+                "Type": "Vraag",
+                "Netwerk (m)": wegennet_lengte_m,
+                "Aansluiting (m)": wegennet_conn_m,
+                "Kosten\nbron": np.nan,
+                "Kosten\nnetwerk": kosten_net_wegennet,
+                "Kosten\naansluiting": kosten_conn_wegennet,
+                "Totale kosten": kosten_tot_wegennet,
+            }
+        )
+        out_leidingen = pd.concat(
+            [out_leidingen_bron, out_leidingen_vraag], ignore_index=True
+        )
+        bron_mask = out_leidingen["Type"] == "Bron"
+        out_leidingen.loc[bron_mask, "Netwerk (m)"] = (
+            pd.to_numeric(
+                out_leidingen.loc[bron_mask, "Kosten\nnetwerk"], errors="coerce"
+            )
+            / 1000.0
+        )
+        out_leidingen.loc[bron_mask, "Aansluiting (m)"] = np.nan
+        out_leidingen = out_leidingen.sort_values(["Woonplaats", "Type"])
         out_fmt = out_leidingen.copy()
         for col in ["Netwerk (m)", "Aansluiting (m)"]:
             s = pd.to_numeric(out_fmt[col], errors="coerce")
             out_fmt[col] = s.map(
-                lambda v: "" if pd.isna(v) else format_dutch_number(v, 0)
+                lambda v: "-" if pd.isna(v) else format_dutch_number(v, 0)
             )
         for col in [
+            "Kosten\nbron",
             "Kosten\nnetwerk",
             "Kosten\naansluiting",
             "Totale kosten",
         ]:
             s = pd.to_numeric(out_fmt[col], errors="coerce")
-            out_fmt[col] = s.map(
-                lambda v: ""
-                if pd.isna(v)
-                else f"€ {format_dutch_number(v, 0)}"
-            )
+            if col == "Kosten\nbron":
+                out_fmt[col] = s.map(
+                    lambda v: "-" if pd.isna(v) else f"€ {format_dutch_number(v, 0)}"
+                )
+            else:
+                out_fmt[col] = s.map(
+                    lambda v: "" if pd.isna(v) else f"€ {format_dutch_number(v, 0)}"
+                )
         _render_wrapped_table(out_fmt, height=420)
 
 
@@ -825,7 +846,7 @@ def render_tabs(
     """
     Tabs:
       - Top woonplaatsen (MWh)  [altijd]
-      - Kandidaat-voorzieningen [alleen als show_sites_layer]
+      - Warmte-hotspots [alleen als show_sites_layer]
     RAM-zuinig: minimale kolomselecties, vectorized formatting.
     """
     if isinstance(sites_costed, list):
@@ -845,7 +866,7 @@ def render_tabs(
     if show_comparison_tab:
         tab_labels.append("Warmtenet inzicht")
     if show_sites_layer:
-        tab_labels.append("Kandidaat-voorzieningen")
+        tab_labels.append("Warmte-hotspots")
     tabs = st.tabs(tab_labels)
     tab_idx = 0
     tab1 = tabs[tab_idx]
@@ -932,9 +953,9 @@ def render_tabs(
                     ).fillna(0)
                     agg_map[col_panden] = "sum"
                 if use_area:
-                    area_series = (
-                        pd.to_numeric(df_wp[col_area], errors="coerce").fillna(0)
-                    )
+                    area_series = pd.to_numeric(
+                        df_wp[col_area], errors="coerce"
+                    ).fillna(0)
                     df_wp[col_area] = area_series
                     agg_map[col_area] = "sum"
                     density_source = "area"
@@ -1018,8 +1039,8 @@ def render_tabs(
             top_wp = top_wp.loc[:, [c for c in ordered_cols if c in top_wp.columns]]
 
             all_types_label = "Klein-, middel- en grootverbruik"
-            show_labels = True if show_pandtype_labels is None else bool(
-                show_pandtype_labels
+            show_labels = (
+                True if show_pandtype_labels is None else bool(show_pandtype_labels)
             )
             show_type_tab = show_labels and (
                 (pand_selectie is None)
@@ -1098,9 +1119,7 @@ def render_tabs(
                             area_series = top_wp.set_index("Woonplaats")[
                                 area_display_col
                             ]
-                            area_series = pd.to_numeric(
-                                area_series, errors="coerce"
-                            )
+                            area_series = pd.to_numeric(area_series, errors="coerce")
                             breakdown["area_ha"] = breakdown["Woonplaats"].map(
                                 area_series
                             )
@@ -1208,9 +1227,9 @@ def render_tabs(
                                 "C": "C - Klein-, middel- en grootverbruik",
                             }
                             breakdown["Type pand"] = (
-                                breakdown["type_code"].map(type_map).fillna(
-                                    breakdown["type_code"]
-                                )
+                                breakdown["type_code"]
+                                .map(type_map)
+                                .fillna(breakdown["type_code"])
                             )
                             breakdown["Woonplaats"] = (
                                 breakdown["woonplaats"].astype(str).str.strip()
@@ -1290,7 +1309,7 @@ def render_tabs(
                 st.warning(warning_text)
         tab_idx += 1
 
-    # --- TAB 3: Kandidaat-voorzieningen ---
+    # --- TAB 3: Warmte-hotspots ---
     if show_sites_layer:
         with tabs[tab_idx]:
             if sites_costed_df is not None and not sites_costed_df.empty:
@@ -1387,11 +1406,13 @@ def render_tabs(
                         out_fmt["Warmtevraag\n per pand (MWh)"], errors="coerce"
                     )
                     out_fmt["Warmtevraag\n per pand (MWh)"] = s.map(
-                        lambda v: ""
-                        if pd.isna(v)
-                        else f"{float(v):,.2f}".replace(",", "#")
-                        .replace(".", ",")
-                        .replace("#", ".")
+                        lambda v: (
+                            ""
+                            if pd.isna(v)
+                            else f"{float(v):,.2f}".replace(",", "#")
+                            .replace(".", ",")
+                            .replace("#", ".")
+                        )
                     )
                 if "Benutting\n(%)" in out_fmt.columns:
                     s = pd.to_numeric(out_fmt["Benutting\n(%)"], errors="coerce")

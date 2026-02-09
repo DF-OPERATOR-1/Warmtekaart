@@ -11,8 +11,11 @@ import pandas as pd
 # -----------------------------
 PARQUET_PATH = Path("/Users/anguyen/Documents/GitHub/Warmtekaart/data/data.parquet")
 
-STATUS_VALUE = ["Pand in gebruik", "Verbouwing pand"] # welke pandstatus wil je behouden
-TOP_N = 10                                              # top N statuswaarden tonen
+STATUS_VALUE = [
+    "Pand in gebruik",
+    "Verbouwing pand",
+]  # welke pandstatus wil je behouden
+TOP_N = 10  # top N statuswaarden tonen
 
 
 # -----------------------------
@@ -21,10 +24,12 @@ TOP_N = 10                                              # top N statuswaarden to
 def select_parquet_engine() -> str:
     try:
         import pyarrow  # noqa: F401
+
         return "pyarrow"
     except Exception:
         try:
             import fastparquet  # noqa: F401
+
             return "fastparquet"
         except Exception as exc:
             raise RuntimeError(
@@ -76,7 +81,9 @@ def summarize_pandstatus(
     return status_counts.rename_axis("pandstatus").to_frame("count")
 
 
-def filter_on_pandstatus(df: pd.DataFrame, status_value: Iterable[str] | str) -> pd.DataFrame:
+def filter_on_pandstatus(
+    df: pd.DataFrame, status_value: Iterable[str] | str
+) -> pd.DataFrame:
     if "pandstatus" not in df.columns:
         raise ValueError("Kolom 'pandstatus' ontbreekt in de dataset.")
 

@@ -46,15 +46,6 @@ def _get_secret(var: str) -> str | None:
     return str(value).strip() or None
 
 
-def _env_url(var: str) -> str | None:
-    """Geef eerst een Streamlit-secret, anders een omgevingsvariabele terug."""
-    secret_val = _get_secret(var)
-    if secret_val:
-        return secret_val
-    val = os.getenv(var, "").strip()
-    return val or None
-
-
 def _env_path(var: str, default: Path) -> Path:
     """Verplicht pad. Laat een env-var het standaardpad overschrijven."""
     val = os.getenv(var)
@@ -71,7 +62,6 @@ def _env_path_opt(var: str, default: Path | None) -> Path | None:
 # Data sources (Paths + optional URLs)
 # -----------------------------
 DATA_CSV_PATH = _env_path("WARMTE_DATA_CSV", DATA_DIR / "data.parquet")
-DATA_CSV_URL = _env_url("WARMTE_URL_DATA_CSV")
 
 ENERGIEARMOEDE_PATH = _env_path(
     "WARMTE_LYR_ENERGIEARMOEDE", LAYERS_DIR / "energiearmoede_frl.geojson.gz"
@@ -95,10 +85,6 @@ WARMTENET_PATH = _env_path(
 WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz")
 WEGENNET_SUMMARY_PATH = _env_path(
     "WARMTE_WEGENNET_CSV", DATA_DIR / "wegennet" / "wegennet.csv"
-)
-WOONPLAATS_GPKG_PATH = _env_path(
-    "WARMTE_LYR_WOONPLAATSEN",
-    LAYERS_DIR / "BAG_Woonplaatsen_FRL-ruw.gpkg",
 )
 WOONPLAATS_AREA_PATH = _env_path(
     "WARMTE_LYR_WOONPLAATSEN_AREA",
