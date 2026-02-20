@@ -683,6 +683,8 @@ def build_sidebar(
                         for w in st.session_state.get("woonplaats_selectie", [])
                         if w in model_wp_options
                     ]
+                    if not model_wp_selectie:
+                        model_wp_selectie = list(model_wp_options)
                     st.session_state["warmtenet_wp_selectie"] = list(model_wp_selectie)
                     ui["warmtenet_wp_selectie"] = list(model_wp_selectie)
                     base_items = _warmtenet_legend_items(
@@ -948,6 +950,8 @@ def build_sidebar(
                             for w in st.session_state.get("woonplaats_selectie", [])
                         ]
                         base_default = [w for w in base_default if w in wp_options]
+                        if not base_default:
+                            base_default = list(wp_options)
                         sync_sig = tuple(base_default)
                         if st.session_state.get("_wegennet_wp_sync") != sync_sig:
                             st.session_state["wegennet_wp_selectie"] = list(
@@ -1285,22 +1289,17 @@ def build_sidebar(
             else:
                 prev_wp = st.session_state.get("woonplaats_selectie", [])
                 prev_wp_filtered = [wp for wp in prev_wp if wp in woonplaatsen_sorted]
-                default_wp = prev_wp_filtered
-                if gemeente_changed and default_wp:
-                    default_wp = default_wp[:1]
-                if not default_wp:
-                    default_wp = [woonplaatsen_sorted[0]] if woonplaatsen_sorted else []
+                if gemeente_changed:
+                    default_wp = list(woonplaatsen_sorted)
+                else:
+                    default_wp = prev_wp_filtered or list(woonplaatsen_sorted)
                 woonplaats_selectie = st.multiselect(
                     "Filter op woonplaats:",
                     options=woonplaatsen_sorted,
                     default=default_wp,
                 )
-                if not woonplaats_selectie:
-                    st.warning("Selecteer minimaal één woonplaats.")
-                    if default_wp:
-                        woonplaats_selectie = default_wp[:1]
-                    elif woonplaatsen_sorted:
-                        woonplaats_selectie = [woonplaatsen_sorted[0]]
+                if not woonplaats_selectie and woonplaatsen_sorted:
+                    woonplaats_selectie = list(woonplaatsen_sorted)
 
             ui["woonplaats_selectie"] = woonplaats_selectie
             st.session_state["woonplaats_selectie"] = woonplaats_selectie
