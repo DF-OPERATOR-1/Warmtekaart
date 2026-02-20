@@ -287,56 +287,63 @@ disable_map_submit = bool(
 
 form = st.form("filters_form")
 with form:
-    ui = build_sidebar(None, potential_meta, warmtenet_meta, wegennet_meta)
+    form_body_slot = st.container()
+    form_button_slot = st.container()
 
-    zoom_level_notice = int(ui.get("zoom_level", 0))
-    heat_unit_notice = str(ui.get("heat_unit", "")).strip()
-    if zoom_level_notice in (9, 10):
-        if heat_unit_notice == "kWh/m²":
-            notice_text = (
-                "Gebruiksoppervlakte (kWh/m²), "
-                "<strong>minder geschikt</strong> voor zoomniveau 9 en 10"
-            )
-        else:
-            notice_text = (
-                "Grondoppervlakte (MWh/ha), "
-                "<strong>geschikt</strong> voor zoomniveau 9 en 10"
-            )
-    else:
-        if heat_unit_notice == "MWh/ha":
-            notice_text = (
-                "Grondoppervlakte (MWh/ha), "
-                "<strong>minder geschikt</strong> voor zoomniveau 11 en 12"
-            )
-        else:
-            notice_text = (
-                "Gebruiksoppervlakte (kWh/m²), "
-                "<strong>geschikt</strong> voor zoomniveau 11 en 12 (pandniveau)"
-            )
-    warmtevraag_notice_slot.markdown(
-        f"""
-        <div style="
-            background-color: #fff4e5;
-            border-left: 4px solid #ff9800;
-            padding: 8px 12px;
-            font-size: 0.85rem;
-            line-height: 1.4;
-            border-radius: 4px;
-            color: #3f2a00;
-            margin-top: 6px;
-        ">
-            <strong>Getoonde warmtevraag:</strong><br>
-            {notice_text}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Registreer de submit-knop direct in de form om initiele waarschuwingen te voorkomen.
+    # Door een aparte slot-container blijft de knop visueel op dezelfde plek staan.
+    with form_button_slot:
+        st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+        map_button_clicked = st.form_submit_button(
+            "Maak kaart",
+            disabled=disable_map_submit,
+        )
 
-    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
-    map_button_clicked = st.form_submit_button(
-        "Maak kaart",
-        disabled=disable_map_submit,
-    )
+    with form_body_slot:
+        ui = build_sidebar(None, potential_meta, warmtenet_meta, wegennet_meta)
+
+        zoom_level_notice = int(ui.get("zoom_level", 0))
+        heat_unit_notice = str(ui.get("heat_unit", "")).strip()
+        if zoom_level_notice in (9, 10):
+            if heat_unit_notice == "kWh/m²":
+                notice_text = (
+                    "Gebruiksoppervlakte (kWh/m²), "
+                    "<strong>minder geschikt</strong> voor zoomniveau 9 en 10"
+                )
+            else:
+                notice_text = (
+                    "Grondoppervlakte (MWh/ha), "
+                    "<strong>geschikt</strong> voor zoomniveau 9 en 10"
+                )
+        else:
+            if heat_unit_notice == "MWh/ha":
+                notice_text = (
+                    "Grondoppervlakte (MWh/ha), "
+                    "<strong>minder geschikt</strong> voor zoomniveau 11 en 12"
+                )
+            else:
+                notice_text = (
+                    "Gebruiksoppervlakte (kWh/m²), "
+                    "<strong>geschikt</strong> voor zoomniveau 11 en 12 (pandniveau)"
+                )
+        warmtevraag_notice_slot.markdown(
+            f"""
+            <div style="
+                background-color: #fff4e5;
+                border-left: 4px solid #ff9800;
+                padding: 8px 12px;
+                font-size: 0.85rem;
+                line-height: 1.4;
+                border-radius: 4px;
+                color: #3f2a00;
+                margin-top: 6px;
+            ">
+                <strong>Getoonde warmtevraag:</strong><br>
+                {notice_text}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 _log_ram("after_sidebar")
 report_container = ui.get("report_slot_container")
