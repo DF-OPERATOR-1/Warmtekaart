@@ -80,7 +80,7 @@ def _legend_theme_colors(dark_mode: bool) -> dict[str, str]:
 
 def _warmtenet_legend_items(
     meta: dict | None,
-    woonplaatsen: list[str],
+    woonplaatsen: list[str] | None,
     allowed_keys: list[str] | None = None,
     allowed_types: list[str] | None = None,
 ) -> list[tuple[list[int], str, str]]:
@@ -94,12 +94,16 @@ def _warmtenet_legend_items(
     type_filter = (
         {str(t).strip().lower() for t in allowed_types} if allowed_types else None
     )
-    wp_filter = {str(w).strip().lower() for w in woonplaatsen} if woonplaatsen else None
+    wp_filter = (
+        {str(w).strip().lower() for w in woonplaatsen}
+        if woonplaatsen is not None
+        else None
+    )
     items: list[tuple[list[int], str, str]] = []
     for key in sorted(label_meta.keys()):
         info = label_meta.get(key) or {}
         wp_norm = str(info.get("woonplaats_norm") or "").strip().lower()
-        if wp_filter and wp_norm and wp_norm not in wp_filter:
+        if wp_filter is not None and wp_norm not in wp_filter:
             continue
         if allowed and key not in allowed:
             continue
@@ -632,180 +636,223 @@ def build_sidebar(
                     st.session_state[water_pot_key] = False
                     auto_blocked_water_pot = True
             if show_warmtenet:
-                default_show_sources = bool(
-                    st.session_state.get("warmtenet_show_sources", True)
-                )
-                default_show_objects = bool(
-                    st.session_state.get("warmtenet_show_objects", True)
-                )
-                default_show_lines = bool(
-                    st.session_state.get("warmtenet_show_lines", True)
-                )
                 st.markdown("**Onderdelen warmtebronnen**")
-                show_sources = st.checkbox(
-                    "Bronnen",
-                    value=default_show_sources,
-                    key="warmtenet_show_sources",
-                )
-                show_objects = st.checkbox(
-                    "Objecten",
-                    value=default_show_objects,
-                    key="warmtenet_show_objects",
-                )
-                show_lines = st.checkbox(
-                    "Leidingen",
-                    value=default_show_lines,
-                    key="warmtenet_show_lines",
-                )
-                ui["warmtenet_show_sources"] = show_sources
-                ui["warmtenet_show_objects"] = show_objects
-                ui["warmtenet_show_lines"] = show_lines
-
-                model_wp_options = (
-                    warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
-                )
-                selected_gemeenten = st.session_state.get("gemeente_selectie", [])
-                if selected_gemeenten:
-                    wp_df = dal_query(
-                        {"gemeente": selected_gemeenten}, "options_woonplaats"
+                if zoom_level < min_zoom:
+                    st.info(
+                        f"Warmtenet op basis van warmtebronnen wordt pas getoond vanaf zoomniveau {min_zoom}."
                     )
-                    allowed_wp = {
-                        str(w) for w in wp_df.get("woonplaats", []) if str(w).strip()
-                    }
-                    if allowed_wp:
-                        model_wp_options = [
-                            w for w in model_wp_options if w in allowed_wp
-                        ]
-                prev_model_wp = [
-                    w
-                    for w in st.session_state.get("warmtenet_wp_selectie", [])
-                    if w in model_wp_options
-                ]
-                base_default = [
-                    w
-                    for w in st.session_state.get("woonplaats_selectie", [])
-                    if w in model_wp_options
-                ]
-                sync_sig = tuple(base_default)
-                if st.session_state.get("_warmtenet_wp_sync") != sync_sig:
-                    st.session_state["warmtenet_wp_selectie"] = list(base_default)
-                    st.session_state["_warmtenet_wp_sync"] = sync_sig
-                if st.session_state.get("warmtenet_wp_selectie") is None:
-                    st.session_state["warmtenet_wp_selectie"] = list(
-                        prev_model_wp or base_default or model_wp_options
+                    ui["warmtenet_opacity"] = st.session_state.setdefault(
+                        "warmtenet_opacity", default_warmtenet_opacity
                     )
-                model_wp_selectie = st.multiselect(
-                    "Filter op woonplaats",
-                    options=model_wp_options,
-                    key="warmtenet_wp_selectie",
-                )
-                ui["warmtenet_wp_selectie"] = model_wp_selectie
-
-                type_opts = warmtenet_meta.get("types", []) if warmtenet_meta else []
-                prev_type_sel = [
-                    t
-                    for t in st.session_state.get("warmtenet_type_selectie", [])
-                    if t in type_opts
-                ]
-                default_type_sel = prev_type_sel or type_opts
-                type_selectie = st.multiselect(
-                    "Filter op type bron:",
-                    options=type_opts,
-                    default=default_type_sel,
-                )
-                st.session_state["warmtenet_type_selectie"] = type_selectie
-                ui["warmtenet_type_selectie"] = type_selectie
-
-                legend_items_all = _warmtenet_legend_items(
-                    warmtenet_meta,
-                    model_wp_selectie,
-                    None,
-                    type_selectie,
-                )
-                filter_sig = (
-                    tuple(sorted(model_wp_selectie)),
-                    tuple(sorted(type_selectie)),
-                )
-                available_keys = [k for *_, k in legend_items_all]
-                # default: bewaar vorige selectie, anders alles
-                prev_sel = [
-                    k
-                    for k in st.session_state.get("warmtenet_selected_keys", [])
-                    if k in available_keys
-                ]
-                if st.session_state.get("_warmtenet_last_filter") != filter_sig:
-                    prev_sel = available_keys
-                if not prev_sel:
-                    prev_sel = available_keys
-                st.session_state["_warmtenet_last_filter"] = filter_sig
-                selected_keys = st.multiselect(
-                    "Kies bronnen om te tonen:",
-                    options=available_keys,
-                    format_func=lambda k: next(
-                        (lbl for _, lbl, key in legend_items_all if key == k), k
-                    ),
-                    default=prev_sel,
-                )
-                ui["warmtenet_selected_keys"] = selected_keys
-                st.session_state["warmtenet_selected_keys"] = selected_keys
-                ui["warmtenet_opacity"] = st.slider(
-                    "Transparantie warmtenet uit warmtebron",
-                    min_value=0.1,
-                    max_value=1.0,
-                    value=float(
-                        st.session_state.get(
-                            "warmtenet_opacity", default_warmtenet_opacity
-                        )
-                    ),
-                    step=0.05,
-                    key="warmtenet_opacity",
-                    help=opacity_help,
-                )
-                legend_items = _warmtenet_legend_items(
-                    warmtenet_meta,
-                    model_wp_selectie,
-                    selected_keys,
-                    type_selectie,
-                )
-                if legend_items:
-                    wp_by_key = (warmtenet_meta or {}).get("wp_by_key", {})
-                    grouped_colors: list[list[int]] = []
-                    grouped_labels: list[str] = []
-                    seen_wp = []
-                    for color, label, key in legend_items:
-                        wp = wp_by_key.get(key, "")
-                        if wp and wp not in seen_wp:
-                            grouped_colors.append(None)
-                            grouped_labels.append(f"<strong>{wp}</strong>")
-                            seen_wp.append(wp)
-                        grouped_colors.append(color)
-                        grouped_labels.append(label)
-                    legend_parts = []
-                    if ui.get("warmtenet_show_sources", True):
-                        legend_parts.append(
-                            "<span style='color:#111;'>&#9679;</span> bron"
-                        )
-                    if ui.get("warmtenet_show_objects", True):
-                        legend_parts.append(
-                            "<span style='color:#111;'>&#9675;</span> object"
-                        )
-                    if ui.get("warmtenet_show_lines", True):
-                        legend_parts.append(
-                            "<span style='color:#444;'>───</span> leiding"
-                        )
-                    header_html = "<br>".join(legend_parts)
-                    legend_title = LAYER_CFG["warmtenet_model"]["legend_title"]
-                    if header_html:
-                        legend_title = f"{legend_title}<br><span style='font-size:12px; display:block;'>{header_html}</span>"
-                    render_mini_legend(
-                        legend_title,
-                        grouped_colors,
-                        grouped_labels,
-                        dark_mode=dark_mode,
-                        footer_html="",
+                    ui["warmtenet_selected_keys"] = st.session_state.setdefault(
+                        "warmtenet_selected_keys", []
+                    )
+                    ui["warmtenet_show_sources"] = st.session_state.setdefault(
+                        "warmtenet_show_sources", True
+                    )
+                    ui["warmtenet_show_objects"] = st.session_state.setdefault(
+                        "warmtenet_show_objects", True
+                    )
+                    ui["warmtenet_show_lines"] = st.session_state.setdefault(
+                        "warmtenet_show_lines", True
+                    )
+                    ui["warmtenet_wp_selectie"] = st.session_state.setdefault(
+                        "warmtenet_wp_selectie", []
+                    )
+                    ui["warmtenet_type_selectie"] = st.session_state.setdefault(
+                        "warmtenet_type_selectie", []
                     )
                 else:
-                    st.info("Geen warmtebronnen voor de huidige selectie.")
+                    model_wp_options = (
+                        warmtenet_meta.get("woonplaatsen", []) if warmtenet_meta else []
+                    )
+                    selected_gemeenten = st.session_state.get("gemeente_selectie", [])
+                    if selected_gemeenten:
+                        wp_df = dal_query(
+                            {"gemeente": selected_gemeenten}, "options_woonplaats"
+                        )
+                        allowed_wp = {
+                            str(w) for w in wp_df.get("woonplaats", []) if str(w).strip()
+                        }
+                        if allowed_wp:
+                            model_wp_options = [
+                                w for w in model_wp_options if w in allowed_wp
+                            ]
+                    model_wp_selectie = [
+                        w
+                        for w in st.session_state.get("woonplaats_selectie", [])
+                        if w in model_wp_options
+                    ]
+                    st.session_state["warmtenet_wp_selectie"] = list(model_wp_selectie)
+                    ui["warmtenet_wp_selectie"] = list(model_wp_selectie)
+                    base_items = _warmtenet_legend_items(
+                        warmtenet_meta,
+                        model_wp_selectie,
+                        None,
+                        None,
+                    )
+                    if not base_items:
+                        ui["warmtenet_show_sources"] = st.session_state.setdefault(
+                            "warmtenet_show_sources", True
+                        )
+                        ui["warmtenet_show_objects"] = st.session_state.setdefault(
+                            "warmtenet_show_objects", True
+                        )
+                        ui["warmtenet_show_lines"] = st.session_state.setdefault(
+                            "warmtenet_show_lines", True
+                        )
+                        st.session_state["warmtenet_type_selectie"] = []
+                        ui["warmtenet_type_selectie"] = []
+                        st.session_state["warmtenet_selected_keys"] = []
+                        ui["warmtenet_selected_keys"] = []
+                        ui["warmtenet_opacity"] = st.session_state.setdefault(
+                            "warmtenet_opacity", default_warmtenet_opacity
+                        )
+                        st.info("Geen warmtebronnen voor de huidige selectie.")
+                    else:
+                        default_show_sources = bool(
+                            st.session_state.get("warmtenet_show_sources", True)
+                        )
+                        default_show_objects = bool(
+                            st.session_state.get("warmtenet_show_objects", True)
+                        )
+                        default_show_lines = bool(
+                            st.session_state.get("warmtenet_show_lines", True)
+                        )
+                        show_sources = st.checkbox(
+                            "Bronnen",
+                            value=default_show_sources,
+                            key="warmtenet_show_sources",
+                        )
+                        show_objects = st.checkbox(
+                            "Objecten",
+                            value=default_show_objects,
+                            key="warmtenet_show_objects",
+                        )
+                        show_lines = st.checkbox(
+                            "Leidingen",
+                            value=default_show_lines,
+                            key="warmtenet_show_lines",
+                        )
+                        ui["warmtenet_show_sources"] = show_sources
+                        ui["warmtenet_show_objects"] = show_objects
+                        ui["warmtenet_show_lines"] = show_lines
+
+                        type_by_key = (warmtenet_meta or {}).get("type_by_key", {})
+                        type_opts = sorted(
+                            {
+                                str(type_by_key.get(key) or "").strip()
+                                for *_, key in base_items
+                                if str(type_by_key.get(key) or "").strip()
+                            }
+                        )
+                        if not type_opts:
+                            type_opts = (
+                                warmtenet_meta.get("types", []) if warmtenet_meta else []
+                            )
+                        prev_type_sel = [
+                            t
+                            for t in st.session_state.get("warmtenet_type_selectie", [])
+                            if t in type_opts
+                        ]
+                        default_type_sel = prev_type_sel or type_opts
+                        type_selectie = st.multiselect(
+                            "Filter op type bron:",
+                            options=type_opts,
+                            default=default_type_sel,
+                        )
+                        st.session_state["warmtenet_type_selectie"] = type_selectie
+                        ui["warmtenet_type_selectie"] = type_selectie
+
+                        legend_items_all = _warmtenet_legend_items(
+                            warmtenet_meta,
+                            model_wp_selectie,
+                            None,
+                            type_selectie,
+                        )
+                        filter_sig = (
+                            tuple(sorted(model_wp_selectie)),
+                            tuple(sorted(type_selectie)),
+                        )
+                        available_keys = [k for *_, k in legend_items_all]
+                        prev_sel = [
+                            k
+                            for k in st.session_state.get("warmtenet_selected_keys", [])
+                            if k in available_keys
+                        ]
+                        if st.session_state.get("_warmtenet_last_filter") != filter_sig:
+                            prev_sel = available_keys
+                        if not prev_sel:
+                            prev_sel = available_keys
+                        st.session_state["_warmtenet_last_filter"] = filter_sig
+                        selected_keys = st.multiselect(
+                            "Kies bronnen om te tonen:",
+                            options=available_keys,
+                            format_func=lambda k: next(
+                                (lbl for _, lbl, key in legend_items_all if key == k), k
+                            ),
+                            default=prev_sel,
+                        )
+                        ui["warmtenet_selected_keys"] = selected_keys
+                        st.session_state["warmtenet_selected_keys"] = selected_keys
+                        ui["warmtenet_opacity"] = st.slider(
+                            "Transparantie warmtenet uit warmtebron",
+                            min_value=0.1,
+                            max_value=1.0,
+                            value=float(
+                                st.session_state.get(
+                                    "warmtenet_opacity", default_warmtenet_opacity
+                                )
+                            ),
+                            step=0.05,
+                            key="warmtenet_opacity",
+                            help=opacity_help,
+                        )
+                        legend_items = _warmtenet_legend_items(
+                            warmtenet_meta,
+                            model_wp_selectie,
+                            selected_keys,
+                            type_selectie,
+                        )
+                        if legend_items:
+                            wp_by_key = (warmtenet_meta or {}).get("wp_by_key", {})
+                            grouped_colors: list[list[int]] = []
+                            grouped_labels: list[str] = []
+                            seen_wp = []
+                            for color, label, key in legend_items:
+                                wp = wp_by_key.get(key, "")
+                                if wp and wp not in seen_wp:
+                                    grouped_colors.append(None)
+                                    grouped_labels.append(f"<strong>{wp}</strong>")
+                                    seen_wp.append(wp)
+                                grouped_colors.append(color)
+                                grouped_labels.append(label)
+                            legend_parts = []
+                            if ui.get("warmtenet_show_sources", True):
+                                legend_parts.append(
+                                    "<span style='color:#111;'>&#9679;</span> bron"
+                                )
+                            if ui.get("warmtenet_show_objects", True):
+                                legend_parts.append(
+                                    "<span style='color:#111;'>&#9675;</span> object"
+                                )
+                            if ui.get("warmtenet_show_lines", True):
+                                legend_parts.append(
+                                    "<span style='color:#444;'>───</span> leiding"
+                                )
+                            header_html = "<br>".join(legend_parts)
+                            legend_title = LAYER_CFG["warmtenet_model"]["legend_title"]
+                            if header_html:
+                                legend_title = f"{legend_title}<br><span style='font-size:12px; display:block;'>{header_html}</span>"
+                            render_mini_legend(
+                                legend_title,
+                                grouped_colors,
+                                grouped_labels,
+                                dark_mode=dark_mode,
+                                footer_html="",
+                            )
+                        else:
+                            st.info("Geen bronnen geselecteerd voor de huidige filters.")
             else:
                 ui["warmtenet_opacity"] = st.session_state.setdefault(
                     "warmtenet_opacity", default_warmtenet_opacity
@@ -875,7 +922,9 @@ def build_sidebar(
 
                     if not wp_options:
                         if no_data_warning:
-                            st.warning("Geen wegennetdata gevonden voor deze gemeente.")
+                            st.warning(
+                                "Geen warmtenetten op basis van wamtevraag beschikbaar voor de huidige geselectie"
+                            )
                         st.session_state["wegennet_wp_selectie"] = []
                         ui["wegennet_wp_selectie"] = []
                         st.session_state.setdefault("wegennet_type_selectie", [])
@@ -1201,7 +1250,10 @@ def build_sidebar(
                 )
                 if not gemeente_selectie:
                     st.warning("Selecteer minimaal één gemeente.")
-                    gemeente_selectie = gemeente_default or gemeente_opties
+                    if gemeente_default:
+                        gemeente_selectie = gemeente_default[:1]
+                    elif gemeente_opties:
+                        gemeente_selectie = [gemeente_opties[0]]
                 prev_gemeente_set = set(prev_gemeente_selectie or [])
                 current_gemeente_set = set(gemeente_selectie)
                 gemeente_changed = current_gemeente_set != prev_gemeente_set
@@ -1233,12 +1285,11 @@ def build_sidebar(
             else:
                 prev_wp = st.session_state.get("woonplaats_selectie", [])
                 prev_wp_filtered = [wp for wp in prev_wp if wp in woonplaatsen_sorted]
-                if gemeente_changed and woonplaatsen_sorted:
-                    default_wp = woonplaatsen_sorted
-                else:
-                    default_wp = prev_wp_filtered
+                default_wp = prev_wp_filtered
+                if gemeente_changed and default_wp:
+                    default_wp = default_wp[:1]
                 if not default_wp:
-                    default_wp = woonplaatsen_sorted or ["Leeuwarden"]
+                    default_wp = [woonplaatsen_sorted[0]] if woonplaatsen_sorted else []
                 woonplaats_selectie = st.multiselect(
                     "Filter op woonplaats:",
                     options=woonplaatsen_sorted,
@@ -1246,7 +1297,10 @@ def build_sidebar(
                 )
                 if not woonplaats_selectie:
                     st.warning("Selecteer minimaal één woonplaats.")
-                    woonplaats_selectie = woonplaatsen_sorted or ["Leeuwarden"]
+                    if default_wp:
+                        woonplaats_selectie = default_wp[:1]
+                    elif woonplaatsen_sorted:
+                        woonplaats_selectie = [woonplaatsen_sorted[0]]
 
             ui["woonplaats_selectie"] = woonplaats_selectie
             st.session_state["woonplaats_selectie"] = woonplaats_selectie

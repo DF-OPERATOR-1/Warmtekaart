@@ -777,25 +777,29 @@ if should_compute:
         )
     )
     value_col = "MWh_per_ha" if heat_unit == "MWh/ha" else "kWh_per_m2"
+    warmtenet_min_zoom = int(LAYER_CFG.get("wegennet", {}).get("min_zoom", 11))
+    show_warmtenet_model = bool(ui.get("show_warmtenet_model")) and (
+        zoom_level >= warmtenet_min_zoom
+    )
 
     perf_info = {"query_ms": None}
     filters_for_dal = _build_dal_filters(ui, resolution=res)
     gjson_warmtenet = None
-    if bool(ui.get("show_warmtenet_model")):
+    if show_warmtenet_model:
         warmtenet_wp_filter = [
             str(w).strip()
-            for w in ui.get("warmtenet_wp_selectie", ui.get("woonplaats_selectie", []))
+            for w in ui.get("warmtenet_wp_selectie", [])
             if str(w).strip()
         ]
-        filter_props = {"woonplaats": warmtenet_wp_filter} if warmtenet_wp_filter else None
-        gjson_warmtenet = load_geojson(
-            WARMTENET_PATH,
-            keep_props=_warmtenet_layer_props,
-            coord_precision=5,
-            filter_props=filter_props,
-            include_geometry=True,
-        )
-        gjson_warmtenet = convert_geojson_to_wgs84_if_needed(gjson_warmtenet)
+        if warmtenet_wp_filter:
+            gjson_warmtenet = load_geojson(
+                WARMTENET_PATH,
+                keep_props=_warmtenet_layer_props,
+                coord_precision=5,
+                filter_props={"woonplaats": warmtenet_wp_filter},
+                include_geometry=True,
+            )
+            gjson_warmtenet = convert_geojson_to_wgs84_if_needed(gjson_warmtenet)
 
     query_start = time.perf_counter()
     df_map_agg = dal_query(filters_for_dal, "map_hex")
@@ -1266,10 +1270,10 @@ if should_compute:
             )
 
         warmtenet_layers: list[pdk.Layer] = []
-        if ui.get("show_warmtenet_model") and gjson_warmtenet:
+        if show_warmtenet_model and gjson_warmtenet:
             warmtenet_layers = create_warmtenet_layers(
                 gjson_warmtenet,
-                ui.get("warmtenet_wp_selectie", ui.get("woonplaats_selectie", [])),
+                ui.get("warmtenet_wp_selectie", []),
                 (warmtenet_meta or {}).get("color_map", {}),
                 ui.get("warmtenet_selected_keys", []),
                 (warmtenet_meta or {}).get("type_by_key", {}),
@@ -1705,7 +1709,7 @@ if should_compute:
                     ui["show_sites_layer"],
                     st.session_state.get("sites_costed"),
                     warmtenet_gjson=gjson_warmtenet,
-                    show_warmtenet=bool(ui.get("show_warmtenet_model")),
+                    show_warmtenet=show_warmtenet_model,
                     show_wegennet=bool(ui.get("show_wegennet")),
                     warmtenet_wp=ui.get("warmtenet_wp_selectie", []),
                     wegennet_wp=ui.get("wegennet_wp_selectie", []),
@@ -1753,7 +1757,7 @@ if should_compute:
             "wooncorporatie": show_corporatie,
             "water_potentie": show_water_potentie,
             "buurt_potentie": show_buurt_potentie,
-            "warmtenet": bool(ui.get("show_warmtenet_model")),
+            "warmtenet": show_warmtenet_model,
             "wegennet": bool(ui.get("show_wegennet")),
             "sites_layer": bool(ui.get("show_sites_layer")),
             "warmtenet_parts": {
