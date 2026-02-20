@@ -6,6 +6,7 @@ core/__pycache__/config.cpython-312.pyc
 .streamlit
 data/data.csv
 .DS_Store
+data/safe file/data.parquet
 data/safe file/data.csv
 data/safe file/data_wkt.csv
 data/safe file/waterlichamen_potentie_extraqt.geojson.gz
@@ -15,5 +16,7 @@ data/safe file/energiearmoede_frl.geojson.gz
 data/safe file/koopwoningen_frl.geojson.gz
 data/safe file/wooncorporatie_frl.geojson.gz
 data/safe file/warmtenet_full.geojson.gz
+data/safe file/warmtenet_full.geojson
+data/safe file/warmtenet_full.parquet
 data/wegennet/wegennet_friesland.geojson
 data/wegennet/wegennet_friesland.gpkg

@@ -30,9 +30,9 @@ with open(input_file, "rb") as f_in:
 import geopandas as gpd
 
 INPUT = (
-    "/Users/anguyen/Documents/GitHub/Warmtekaart/data/layers/warmtenet_full.geojson.gz"
+    "/Users/anitavn/Documents/Warmtekaart_test/streamlit/Untitled/data/layers/wooncorporatie_frl.geojson.gz"
 )
-OUTPUT = "warmtenet_full.parquet"
+OUTPUT = "wooncorporatie_frl.parquet"
 
 # Gebruik GDAL gzip virtual filesystem
 INPUT_VSI = f"/vsigzip/{INPUT}"

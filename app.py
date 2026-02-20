@@ -161,6 +161,41 @@ report_status_slot = kpi_container.empty()
 
 # ========== GeoJSON / CSV laden ==========
 _gj_common_props = ["buurtnaam", "gemeentenaam"]
+_warmtenet_meta_props = [
+    "woonplaats",
+    "bron_key",
+    "bron_id",
+    "gegevensbron",
+    "type_bron",
+]
+_warmtenet_layer_props = [
+    "layer",
+    "woonplaats",
+    "bron_key",
+    "bron_id",
+    "vraag_id",
+    "gegevensbron",
+    "type_bron",
+    "bron_mwh_per_jaar",
+    "vraag_mwh_per_jaar",
+    "ingezet_mwh_per_jaar",
+    "benutting_pct",
+    "aangesloten_objecten",
+    "kosten_bron_euro",
+    "kosten_aansluitingen_euro",
+    "bron_totale_kosten_euro",
+    "kosten_aansluiting_euro",
+    "afstand_pad_m",
+    "plaats_aangesloten_objecten",
+    "plaats_aantal_bronnen",
+    "plaats_kosten_bronnen_euro",
+    "plaats_kosten_aansluitingen_euro",
+    "plaats_kosten_leidingen_euro",
+    "plaats_totale_kosten_euro",
+    "plaats_gemiddelde_kosten_euro",
+    "padlengte_m",
+    "geometrie_lengte_m",
+]
 
 show_energiearmoede = bool(
     st.session_state.get(LAYER_CFG["energiearmoede"]["toggle_key"], False)
@@ -176,9 +211,6 @@ show_water_potentie = bool(
 )
 show_buurt_potentie = bool(
     st.session_state.get(LAYER_CFG["buurt_potentie"]["toggle_key"], False)
-)
-show_warmtenet = bool(
-    st.session_state.get(LAYER_CFG["warmtenet_model"]["toggle_key"], False)
 )
 
 gjson_energiearmoede = None
@@ -230,40 +262,11 @@ if show_buurt_potentie:
     gjson_buurt_potentie = convert_geojson_to_wgs84_if_needed(gjson_buurt_potentie)
 
 gjson_warmtenet = None
-if show_warmtenet:
-    gjson_warmtenet = load_geojson(
-        WARMTENET_PATH,
-        keep_props=[
-            "layer",
-            "woonplaats",
-            "bron_key",
-            "bron_id",
-            "vraag_id",
-            "gegevensbron",
-            "type_bron",
-            "bron_mwh_per_jaar",
-            "vraag_mwh_per_jaar",
-            "ingezet_mwh_per_jaar",
-            "benutting_pct",
-            "aangesloten_objecten",
-            "kosten_bron_euro",
-            "kosten_aansluitingen_euro",
-            "bron_totale_kosten_euro",
-            "kosten_aansluiting_euro",
-            "afstand_pad_m",
-            "plaats_aangesloten_objecten",
-            "plaats_aantal_bronnen",
-            "plaats_kosten_bronnen_euro",
-            "plaats_kosten_aansluitingen_euro",
-            "plaats_kosten_leidingen_euro",
-            "plaats_totale_kosten_euro",
-            "plaats_gemiddelde_kosten_euro",
-            "padlengte_m",
-            "geometrie_lengte_m",
-        ],
-        coord_precision=5,
-    )
-    gjson_warmtenet = convert_geojson_to_wgs84_if_needed(gjson_warmtenet)
+gjson_warmtenet_meta = load_geojson(
+    WARMTENET_PATH,
+    keep_props=_warmtenet_meta_props,
+    include_geometry=False,
+)
 
 _log_ram("after_geojson_loads")
 
@@ -272,7 +275,7 @@ if gjson_water_potentie:
     potential_meta["water_potentie"] = build_water_potential_meta(gjson_water_potentie)
 if gjson_buurt_potentie:
     potential_meta["buurt_potentie"] = build_buurt_potential_meta(gjson_buurt_potentie)
-warmtenet_meta = build_warmtenet_meta(gjson_warmtenet)
+warmtenet_meta = build_warmtenet_meta(gjson_warmtenet_meta)
 wegennet_meta = build_wegennet_meta(None)
 
 # ========== Sidebar / UI ==========
@@ -777,6 +780,23 @@ if should_compute:
 
     perf_info = {"query_ms": None}
     filters_for_dal = _build_dal_filters(ui, resolution=res)
+    gjson_warmtenet = None
+    if bool(ui.get("show_warmtenet_model")):
+        warmtenet_wp_filter = [
+            str(w).strip()
+            for w in ui.get("warmtenet_wp_selectie", ui.get("woonplaats_selectie", []))
+            if str(w).strip()
+        ]
+        filter_props = {"woonplaats": warmtenet_wp_filter} if warmtenet_wp_filter else None
+        gjson_warmtenet = load_geojson(
+            WARMTENET_PATH,
+            keep_props=_warmtenet_layer_props,
+            coord_precision=5,
+            filter_props=filter_props,
+            include_geometry=True,
+        )
+        gjson_warmtenet = convert_geojson_to_wgs84_if_needed(gjson_warmtenet)
+
     query_start = time.perf_counter()
     df_map_agg = dal_query(filters_for_dal, "map_hex")
     perf_info["query_ms"] = int((time.perf_counter() - query_start) * 1000)
@@ -1733,7 +1753,7 @@ if should_compute:
             "wooncorporatie": show_corporatie,
             "water_potentie": show_water_potentie,
             "buurt_potentie": show_buurt_potentie,
-            "warmtenet": show_warmtenet,
+            "warmtenet": bool(ui.get("show_warmtenet_model")),
             "wegennet": bool(ui.get("show_wegennet")),
             "sites_layer": bool(ui.get("show_sites_layer")),
             "warmtenet_parts": {

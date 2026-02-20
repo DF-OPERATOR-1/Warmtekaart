@@ -64,25 +64,25 @@ def _env_path_opt(var: str, default: Path | None) -> Path | None:
 DATA_CSV_PATH = _env_path("WARMTE_DATA_CSV", DATA_DIR / "data.parquet")
 
 ENERGIEARMOEDE_PATH = _env_path(
-    "WARMTE_LYR_ENERGIEARMOEDE", LAYERS_DIR / "energiearmoede_frl.geojson.gz"
+    "WARMTE_LYR_ENERGIEARMOEDE", LAYERS_DIR / "energiearmoede_frl.parquet"
 )
 KOOPWONINGEN_PATH = _env_path(
-    "WARMTE_LYR_KOOPWONINGEN", LAYERS_DIR / "koopwoningen_frl.geojson.gz"
+    "WARMTE_LYR_KOOPWONINGEN", LAYERS_DIR / "koopwoningen_frl.parquet"
 )
 WOONCORPORATIE_PATH = _env_path(
-    "WARMTE_LYR_WOONCORPORATIE", LAYERS_DIR / "wooncorporatie_frl.geojson.gz"
+    "WARMTE_LYR_WOONCORPORATIE", LAYERS_DIR / "wooncorporatie_frl.parquet"
 )
 WATER_POTENTIE_PATH = _env_path(
     "WARMTE_LYR_WATER_POTENTIE",
-    LAYERS_DIR / "waterlichamen_potentie_extraqt.geojson.gz",
+    LAYERS_DIR / "waterlichamen_potentie_extraqt.parquet",
 )
 BUURT_POTENTIE_PATH = _env_path(
-    "WARMTE_LYR_BUURT_POTENTIE", LAYERS_DIR / "buurt_potentie_extraqt.geojson.gz"
+    "WARMTE_LYR_BUURT_POTENTIE", LAYERS_DIR / "buurt_potentie_extraqt.parquet"
 )
 WARMTENET_PATH = _env_path(
-    "WARMTE_LYR_WARMTENET", LAYERS_DIR / "warmtenet_full.geojson.gz"
+    "WARMTE_LYR_WARMTENET", LAYERS_DIR / "warmtenet_full.parquet"
 )
-WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl.geojson.gz")
+WEGENNET_PATH = _env_path("WARMTE_LYR_WEGENNET", LAYERS_DIR / "wegennet_frl")
 WEGENNET_SUMMARY_PATH = _env_path(
     "WARMTE_WEGENNET_CSV", DATA_DIR / "wegennet" / "wegennet.csv"
 )
