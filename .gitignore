@@ -20,3 +20,4 @@ data/safe file/warmtenet_full.geojson
 data/safe file/warmtenet_full.parquet
 data/wegennet/wegennet_friesland.geojson
 data/wegennet/wegennet_friesland.gpkg
+data/scripts/export_h3_format.py
